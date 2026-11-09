@@ -190,7 +190,8 @@ assert(yTicks.length >= 2 && yTicks.every((t) => String(t.label).length === 4), 
 const rets = []
 for (let i = 0; i < 60; i++) rets.push({ label: '2024-01-' + String(1 + (i % 28)).padStart(2, '0'), value: (i % 2 ? 1 : -1) * 0.5 })
 const vol = C.rollingVol(rets, 20)
-assert(vol.length === 60 && vol[0].y === 0 && vol[19].y === 0, '滚动波动率预热期为 0')
+assert(vol.length === 60, '滚动波动率与交易日等长')
+assert(vol[0].y === null && vol[19].y === null, '预热期返回 null（不是 0，避免误读成零波动）')
 assert(vol[40].y > 0, '预热后波动率为正（' + vol[40].y.toFixed(2) + '%）')
 
 /* ── 10. 叠加线与副轴 ── */
@@ -209,6 +210,32 @@ assert(all(svg6, 'text').some((t) => String(t.textContent).indexOf('期望路径
 assert(all(svg6, 'text').some((t) => String(t.textContent).indexOf('波动') >= 0), '副轴有标签')
 const dots = all(svg6, 'circle')
 assert(dots.length >= 3, '画了极值/末值标记（' + dots.length + ' 个点）')
+
+/* ── 10.5 柱图：稳健尺度 + 截断标记（极端日不能撑爆纵轴） ── */
+const outlierBars = []
+for (let i = 0; i < 100; i++) outlierBars.push({ label: '2024-03-' + String(1 + (i % 28)).padStart(2, '0'), value: i === 50 ? 9.5 : 0.2 })
+outlierBars[51].value = -8.0
+const hostOutlier = node('div')
+const barInfo = C.drawBars(hostOutlier, { items: outlierBars, height: 210 })
+assert(barInfo && typeof barInfo.bound === 'number', 'drawBars 返回尺度信息')
+assert(barInfo.bound < 9.0, '纵轴用中位数×4 定界，不被 9.5% 的极端日撑爆（bound=' + barInfo.bound.toFixed(2) + '）')
+assert(barInfo.clipped === 2, '统计出 2 个超范围极端日（实际 ' + barInfo.clipped + '）')
+const svgOutlier = hostOutlier.children[0]
+const clippedRects = all(svgOutlier, 'rect').filter((r) => r.attrs.opacity === '0.55')
+assert(clippedRects.length === 2, '极端日的柱子用更低透明度标出')
+assert(all(svgOutlier, 'line').length >= 2, '极端日终点画了截断横线')
+
+/* ── 10.6 逐日收益读数：均值/波动/胜率/最长连亏 ── */
+const statItems = [
+  { label: 'd1', value: 1 }, { label: 'd2', value: -1 }, { label: 'd3', value: -1 },
+  { label: 'd4', value: -1 }, { label: 'd5', value: 2 },
+]
+const st2 = C.dailyStats(statItems)
+assert(Math.abs(st2.mu - 0) < 1e-9, '日均 = 0（+1-1-1-1+2）')
+assert(st2.winRate === 40, '胜率 40%（5 天赢 2 天，实际 ' + st2.winRate + '）')
+assert(st2.maxLoseStreak === 3, '最长连亏 3 天（实际 ' + st2.maxLoseStreak + '）')
+assert(st2.best === 2 && st2.worst === -1, '最好/最差取到极值')
+assert(C.dailyStats([]) === null, '空序列返回 null')
 
 /* ── 11. 回归：文本不许是黑色（深色面板上等于隐形） ── */
 const blackLike = new Set(['#000', '#000000', 'black', 'rgb(0,0,0)', 'rgb(0, 0, 0)'])

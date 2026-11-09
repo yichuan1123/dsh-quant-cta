@@ -179,6 +179,7 @@
         </div>
       </div>
       <div id="intraday" class="chart-wrap" style="margin-top:10px"></div>
+      <div id="intradaysummary" class="note" style="margin-top:8px"></div>
       <div class="note">日频引擎只有日线：这里的「分时」= 每个交易日的收益/权益序列。真正的分钟级分时图需要日内行情（tick/1m），当前数据管道不提供。</div>
     </div>
   </section>
@@ -393,11 +394,40 @@
     renderIntraday();
   }
 
+  /** 逐日收益的读数：把「看图」变成「读数字」，方便总结经验。 */
+  function dailyStats(items) {
+    var n = items.length;
+    if (!n) return null;
+    var vals = items.map(function (x) { return x.value; });
+    var sum = 0, i;
+    for (i = 0; i < n; i++) sum += vals[i];
+    var mu = sum / n;
+    var varSum = 0;
+    for (i = 0; i < n; i++) varSum += (vals[i] - mu) * (vals[i] - mu);
+    var sd = n > 1 ? Math.sqrt(varSum / (n - 1)) : 0;
+    var wins = 0;
+    for (i = 0; i < n; i++) if (vals[i] > 0) wins++;
+    // 最长连亏
+    var streak = 0, worstStreak = 0;
+    for (i = 0; i < n; i++) {
+      if (vals[i] < 0) { streak++; if (streak > worstStreak) worstStreak = streak; }
+      else streak = 0;
+    }
+    var best = vals[0], worst = vals[0];
+    for (i = 1; i < n; i++) { if (vals[i] > best) best = vals[i]; if (vals[i] < worst) worst = vals[i]; }
+    return {
+      n: n, mu: mu, sd: sd, annVol: sd * Math.sqrt(252),
+      winRate: wins / n * 100, maxLoseStreak: worstStreak,
+      best: best, worst: worst,
+    };
+  }
+
   /** 滚动年化波动率（%）——用来看「这段行情的风险有没有变大」。 */
   function rollingVol(items, win) {
     var out = [];
     for (var i = 0; i < items.length; i++) {
-      if (i < win) { out.push({ x: items[i].label, y: 0 }); continue; }
+      // 预热期给 null（不是 0）：画成 0 会让人误读成「这段波动率为零」
+      if (i < win) { out.push({ x: items[i].label, y: null }); continue; }
       var seg = [];
       for (var k = i - win + 1; k <= i; k++) seg.push(items[k].value);
       var mu = seg.reduce(function (a, b) { return a + b; }, 0) / seg.length;
@@ -430,18 +460,22 @@
         var b = view[i].equity;
         items.push({ label: view[i].date, value: a > 0 ? (b / a - 1) * 100 : 0 });
       }
-      var wins = items.filter(function (x) { return x.value > 0; }).length;
-      var worst = 0;
-      for (var w = 0; w < items.length; w++) if (items[w].value < items[worst].value) worst = w;
+      var st = dailyStats(items);
       if (title) {
-        title.textContent = '逐日收益（日频，' + items.length + ' 个交易日，上涨 ' + wins +
-          ' 天 / 下跌 ' + (items.length - wins) + ' 天，最差单日 ' + items[worst].value.toFixed(2) +
-          '% @ ' + items[worst].label + '；虚线为累计，紫线为 20 日滚动波动率）';
+        title.textContent = '逐日收益（日频，' + items.length + ' 个交易日）· 柱=当日收益　虚线=累计　紫线=20 日滚动波动率';
       }
-      drawBars(host, {
+      var res = drawBars(host, {
         items: items, height: 210, cumulative: true,
         secondary: { points: rollingVol(items, 20), color: '#9b6dff', unit: '%', label: '20日年化波动' },
       });
+      var sum = document.getElementById('intradaysummary');
+      if (sum && st) {
+        sum.textContent = '读数：日均 ' + (st.mu >= 0 ? '+' : '') + st.mu.toFixed(3) + '%　日波动 ' +
+          st.sd.toFixed(2) + '%（年化 ' + st.annVol.toFixed(1) + '%）　胜率 ' + st.winRate.toFixed(1) +
+          '%　最长连亏 ' + st.maxLoseStreak + ' 天　最好 ' + st.best.toFixed(2) + '%　最差 ' +
+          st.worst.toFixed(2) + '%' +
+          (res && res.clipped ? '　（' + res.clipped + ' 个极端日超出显示范围，已截断标记）' : '');
+      }
     } else {
       if (title) title.textContent = '权益走势（日频，共 ' + view.length + ' 个交易日）';
       drawLine(host, {
@@ -449,6 +483,17 @@
         color: COLORS.accent, height: 210, label: '权益走势',
         tipFormat: function (v) { return money(v); },
       });
+      var sum2 = document.getElementById('intradaysummary');
+      if (sum2) {
+        var first = view[0].equity, lastE = view[view.length - 1].equity;
+        var peakV = view[0].equity, dd = 0;
+        for (var q = 0; q < view.length; q++) {
+          peakV = Math.max(peakV, view[q].equity);
+          if (peakV > 0) dd = Math.max(dd, (peakV - view[q].equity) / peakV);
+        }
+        sum2.textContent = '读数：区间收益 ' + ((lastE / first - 1) * 100).toFixed(2) + '%　起点 ' +
+          money(first) + '　终点 ' + money(lastE) + '　期间最大回撤 ' + (dd * 100).toFixed(2) + '%';
+      }
     }
   }
 
@@ -1113,16 +1158,26 @@
 
     if (hit.addEventListener) {
       hit.addEventListener('mousemove', function (ev) {
-        var box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { left: 0, width: W };
-        var ratio = box.width > 0 ? (ev.clientX - box.left) / box.width : 0;
+        var box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { left: 0, top: 0, width: W, height: H };
+        var bw = box.width || W, bh = box.height || H;
+        var scale = W / bw;                                  // SVG 用户单位 / CSS 像素
+        var xUser = (ev.clientX - box.left) * scale;         // 光标换算到用户坐标
+        // 关键：相对**绘图区**取比例（扣掉左右内边距），否则十字线会比光标偏一段
+        var ratio = iw > 0 ? (xUser - pad.l) / iw : 0;
+        ratio = Math.max(0, Math.min(1, ratio));
         var idx = Math.round(ratio * (pts.length - 1));
         idx = Math.max(0, Math.min(pts.length - 1, idx));
         var px = X(idx), py = Y(pts[idx].y);
         cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.setAttribute('opacity', '1');
         dot.setAttribute('cx', px); dot.setAttribute('cy', py); dot.setAttribute('opacity', '1');
         var text = String(pts[idx].x) + '　' + (opts.tipFormat ? opts.tipFormat(pts[idx].y) : fmtAxis(pts[idx].y, opts.unit));
-        tip(host, text, px / W * (box.width || W), py / H * (box.height || H) - 14);
+        // 提示框位置也用同一个换算，并在左右边缘夹住，避免被裁掉
+        var cssX = px / scale;
+        cssX = Math.max(52, Math.min(bw - 52, cssX));
+        var cssY = Math.max(18, (py / scale) - 8);
+        tip(host, text, cssX, cssY);
       });
+      // 移出绘图区也要清掉，避免残留十字线
       hit.addEventListener('mouseleave', function () {
         cross.setAttribute('opacity', '0');
         dot.setAttribute('opacity', '0');
@@ -1233,9 +1288,19 @@
       return;
     }
     var vals = items.map(function (x) { return x.value; });
-    var lo = Math.min(0, Math.min.apply(null, vals));
-    var hi = Math.max(0, Math.max.apply(null, vals));
-    if (hi === lo) hi = lo + 1;
+    // 稳健尺度：用 |收益| 的 98 分位定对称上下界。
+    // 直接用 min/max 会被一两个异常日撑爆，典型日被压成一条线——
+    // 这就是「分化太糊、看着就长长一截」的根因。极端日截断绘制并单独标注。
+    var absSorted = vals.map(Math.abs).slice().sort(function (a, b) { return a - b; });
+    var pick = function (q) {
+      if (!absSorted.length) return 0;
+      return absSorted[Math.min(absSorted.length - 1, Math.floor(absSorted.length * q))];
+    };
+    // 中位数 × 4 定界最抗爆（少数极端日不会抬高界），再用 p90 兜住「大多数日子都很大」的情形。
+    // 单纯用 min/max 或 98 分位都会被一两个异常日带偏，典型日就被压成一条线。
+    var bound = Math.max(pick(0.5) * 4, pick(0.9) * 1.05, 0.05);
+    var lo = -bound, hi = bound;
+    var clipped = vals.filter(function (v) { return Math.abs(v) > bound + 1e-12; }).length;
     var iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
     function Y(v) { return pad.t + ih - ih * (v - lo) / (hi - lo); }
     var bw = Math.max(1, iw / items.length * 0.72);
@@ -1255,17 +1320,28 @@
     for (var i = 0; i < items.length; i++) {
       var x = pad.l + iw * i / items.length;
       var v = items[i].value;
-      var y1 = Y(Math.max(0, v)), y2 = Y(Math.min(0, v));
+      var vc = Math.max(-bound, Math.min(bound, v));   // 超出显示范围就截断
+      var y1 = Y(Math.max(0, vc)), y2 = Y(Math.min(0, vc));
       var rect = svgEl('rect', {
         x: (x + (iw / items.length - bw) / 2).toFixed(2),
         y: y1.toFixed(2),
         width: bw.toFixed(2),
         height: Math.max(0.6, y2 - y1).toFixed(2),
         fill: v >= 0 ? COLORS.up : COLORS.down,
-        opacity: '0.85',
+        opacity: Math.abs(v) > bound ? '0.55' : '0.85',
       });
       rect.setAttribute('data-date', items[i].label);
       svg.appendChild(rect);
+      if (Math.abs(v) > bound) {
+        // 截断终点画一道短横线，表示「实际比这更长」
+        var capY = v > 0 ? Y(bound) : Y(-bound);
+        svg.appendChild(svgEl('line', {
+          x1: (x + (iw / items.length - bw) / 2).toFixed(2),
+          x2: (x + (iw / items.length + bw) / 2).toFixed(2),
+          y1: capY.toFixed(2), y2: capY.toFixed(2),
+          stroke: v >= 0 ? COLORS.up : COLORS.down, 'stroke-width': '1.5', opacity: '0.95',
+        }));
+      }
     }
     // 累计线：**独立右轴刻度**。日收益是几毛钱的量级，累计能到几十个点，
     // 共用左轴的话它一定冲出图外（第一版就是这么错的）。
@@ -1294,14 +1370,20 @@
     // 副轴：滚动波动率（独立刻度，画在右轴）
     if (opts.secondary && opts.secondary.points && opts.secondary.points.length >= 2) {
       var sec = opts.secondary.points;
-      var sLo = Math.min.apply(null, sec.map(function (p) { return p.y; }));
-      var sHi = Math.max.apply(null, sec.map(function (p) { return p.y; }));
+      var validSec = sec.filter(function (p) { return p.y !== null && isFinite(p.y); });
+      var sLo = Math.min.apply(null, validSec.map(function (p) { return p.y; }));
+      var sHi = Math.max.apply(null, validSec.map(function (p) { return p.y; }));
+      if (!validSec.length) { sLo = 0; sHi = 1; }
       if (sHi === sLo) sHi = sLo + 1;
       function YS(v) { return pad.t + ih - ih * (v - sLo) / (sHi - sLo); }
       var sdp = '';
+      var started = false;
       for (var si = 0; si < sec.length; si++) {
+        var sv = sec[si].y;
+        if (sv === null || !isFinite(sv)) { started = false; continue; }  // 预热期断开
         var sx = pad.l + iw * (si + 0.5) / sec.length;
-        sdp += (si === 0 ? 'M' : ' L') + sx.toFixed(2) + ' ' + YS(sec[si].y).toFixed(2);
+        sdp += (started ? ' L' : ' M') + sx.toFixed(2) + ' ' + YS(sv).toFixed(2);
+        started = true;
       }
       svg.appendChild(svgEl('path', { d: sdp, fill: 'none', stroke: opts.secondary.color || '#9b6dff',
                                       'stroke-width': '1.2', opacity: '0.9' }));
@@ -1311,7 +1393,8 @@
       svg.appendChild(chip);
       var smax = svgEl('text', { x: pad.l + 6, y: pad.t + 11, 'text-anchor': 'start',
                                  fill: opts.secondary.color || '#9b6dff', 'font-size': '9' });
-      smax.textContent = (opts.secondary.label || '') + ' 峰值 ' + sHi.toFixed(1) + (opts.secondary.unit || '');
+      smax.textContent = (opts.secondary.label || '') + ' 峰值 ' + (validSec.length ? sHi.toFixed(1) : '—') +
+        (validSec.length ? (opts.secondary.unit || '') : '');
       svg.appendChild(smax);
     }
 
@@ -1326,14 +1409,25 @@
     svg.appendChild(hit);
     if (hit.addEventListener) {
       hit.addEventListener('mousemove', function (ev) {
-        var box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { left: 0, width: W, height: H };
-        var ratio = box.width > 0 ? (ev.clientX - box.left) / box.width : 0;
+        var box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { left: 0, top: 0, width: W, height: H };
+        var bw2 = box.width || W;
+        var scale = W / bw2;
+        var xUser = (ev.clientX - box.left) * scale;
+        // 同折线图：相对绘图区取比例，扣掉左内边距
+        var ratio = iw > 0 ? (xUser - pad.l) / iw : 0;
+        ratio = Math.max(0, Math.min(0.999999, ratio));
         var idx = Math.max(0, Math.min(items.length - 1, Math.floor(ratio * items.length)));
-        tip(host, String(items[idx].label) + '　' + (items[idx].value >= 0 ? '+' : '') + items[idx].value.toFixed(2) + '%',
-            ratio * (box.width || W), (Y(Math.max(0, items[idx].value)) / H) * (box.height || H) - 10);
+        var v = items[idx].value;
+        var vc2 = Math.max(-bound, Math.min(bound, v));
+        var cssX = ((pad.l + iw * (idx + 0.5) / items.length) / scale);
+        cssX = Math.max(52, Math.min(bw2 - 52, cssX));
+        var cssY = Math.max(18, (Y(Math.max(0, vc2)) / scale) - 8);
+        tip(host, String(items[idx].label) + '　' + (v >= 0 ? '+' : '') + v.toFixed(2) + '%' +
+          (Math.abs(v) > bound ? '（超显示范围）' : ''), cssX, cssY);
       });
       hit.addEventListener('mouseleave', function () { tip(host, null); });
     }
+    return { bound: bound, clipped: clipped };
   }
 
   /* ================= 模型与调度的渲染 ================= */
@@ -1578,6 +1672,7 @@
     drawLine: drawLine, drawDonut: drawDonut, drawBars: drawBars, drawSectorBars: drawSectorBars,
     niceTicks: niceTicks, colorMap: colorMap, sectorColor: sectorColor, constraintsText: constraintsText,
     fmtAxis: fmtAxis, lttb: lttb, timeTicks: timeTicks, rollingVol: rollingVol, hostWidth: hostWidth,
+    dailyStats: dailyStats,
     __setCurve: function (c) { LAST_CURVE = c; renderIntraday(); },
     __setIntradayMode: function (m) { INTRADAY_MODE = m; },
     __setParams: function (p) { PARAMS = p; syncParamInputs(); },
