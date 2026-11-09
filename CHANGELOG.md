@@ -2,6 +2,24 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] - 2026-11-09
+
+### 修复
+
+- `--refresh` 不带 `--live` 时，即使已有真实行情缓存也会静默降级成合成数据。现在有缓存必用缓存，并加了回归测试
+- 分腿归因的期末权益与总权益口径不一致（差的就是强平成本）。`run()` 新增 `liquidate` 开关，强平后同步各腿曲线
+- paper 的指标与日志权益口径不一致：改为 `liquidate=False` 的持仓库口径，与模拟盘账户的真实状态一致
+- `qcta_report action="get"` 描述写「打印完整 markdown」，实现只给摘要。现在读回 `report.md` 全文（超 12k 字符截断并提示路径）
+- CI 里回测产物路径写错（`python/runs` → `runs`），会让流水线恒红
+- 清理未使用的导入
+
+### 新增
+
+- `tools/verify_invariants.py`：对任意报告核验三条账本恒等式
+- `tools/smoke.mjs`：用假 ctx 装配插件、打真引擎的冒烟测试
+- GitHub Actions CI（单测 + 端到端回测 + 恒等式 + 插件语法 + 冒烟）
+- 单测 32 → 35（新增分腿一致性、未平仓保留、refresh 不降级三条）
+
 ## [0.1.0] - 2026-11-09
 
 ### 新增
