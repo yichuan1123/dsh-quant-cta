@@ -26,16 +26,27 @@
 
 ### 1. 装成本地 DSH 插件
 
-```bash
-# 方式 A：本地链接（开发用）
-cd ~/.dsh/profiles/desktop
-pnpm add link:J:/DSH1J/dsh-quant-cta
+**本地目录安装（已验证可用，不动 pnpm 锁文件）**：
 
-# 方式 B：npm 公开包（发布后）
-dsh plugin add dsh-quant-cta
+```bash
+# 1) 把插件目录联接进 profile 的 node_modules
+powershell -NoProfile -Command "New-Item -ItemType Junction -Path '<profile>\node_modules\dsh-quant-cta' -Target '<repo>'"
+
+# 2) 在 profile 的 cordis.patch.yml 末尾追加（config 里写本机 Python 路径）
+#    - insert:
+#        - id: dsh-quant-cta
+#          name: dsh-quant-cta
+#          config:
+#            pythonPath: <repo>/.venv/Scripts/python.exe
+#            engineRoot: <repo>
+
+# 3) 重启 DSH
 ```
 
-然后把包名加进 profile 的 `dsh.profile.bundles`，重启 DSH。插件自带 `cordis.patch.yml`，会把自己插进插件名单。
+其中 `<profile>` 一般是 `%USERPROFILE%\.dsh\profiles\desktop`。
+
+**发布到 npm 后**也可以用 `dsh plugin add dsh-quant-cta`（插件自带 `cordis.patch.yml`，
+会把自己插进插件名单；本机 Python 路径仍需在 profile 的 patch 层给出）。
 
 ### 2. 装 Python 依赖
 
@@ -109,6 +120,8 @@ python -m qcta paper step --live
 - **合约规格是近似值**。手续费/保证金随交易所公告调整，下单前必须核对。
 - **合成数据不是行情**。它只用来验证流程，报告里永远标注 `synthetic`。
 - **不构成投资建议**。历史回测不代表未来收益。
+- **跨策略腿不做净额对冲**：两条腿在同一个品种上方向相反时，账上会同时持有两个方向的持仓
+  （净敞口正确，但多付一份手续费与保证金）。这是为归因清晰做的取舍。
 
 ## 开发
 
