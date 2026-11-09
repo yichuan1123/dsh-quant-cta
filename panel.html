@@ -118,6 +118,35 @@
 (function () {
   var state = { overview: null, runId: '' };
 
+  /**
+   * 统一的请求封装。
+   * 宿主端没重启时 /api/sim、/api/credentials 会返回 404 + "not found"，
+   * 直接 r.json() 会抛 "Unexpected end of JSON input" —— 那不是用户能理解的东西。
+   * 这里把「接口不存在」翻译成一句可执行的提示。
+   */
+  function requestJson(url, opts) {
+    var init = opts || {};
+    init.cache = 'no-store';
+    return fetch(url, init).then(function (res) {
+      return res.text().then(function (text) {
+        var data = null;
+        try { data = text ? JSON.parse(text) : null } catch (e) { data = null }
+        if (!res.ok || data === null) {
+          var msg = '接口不可用（HTTP ' + res.status + '）';
+          if (res.status === 404) {
+            msg += '：插件宿主端还是旧版本，重启 DSH 后再刷新本页。';
+          } else if (data === null) {
+            msg += '：返回内容不是 JSON。';
+          }
+          var err = new Error(msg);
+          err.status = res.status;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
   function el(tag, cls, text) {
     var d = document.createElement(tag);
     if (cls) d.className = cls;
@@ -340,8 +369,7 @@
   }
 
   function load() {
-    fetch('/dsh-quant-cta/api/overview', { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
+    requestJson('/dsh-quant-cta/api/overview')
       .then(renderOverview)
       .catch(function (e) {
         document.getElementById('warn').innerHTML = '';
@@ -375,8 +403,7 @@
   }
 
   function loadCredentials() {
-    fetch('/dsh-quant-cta/api/credentials', { cache: 'no-store' })
-      .then(function (r) { return r.json() })
+    requestJson('/dsh-quant-cta/api/credentials')
       .then(renderCredStatus)
       .catch(function (e) { renderCredStatus({ ok: false, error: String(e) }) });
   }
@@ -389,11 +416,11 @@
   }
 
   function postCred(url, body) {
-    return fetch(url, {
+    return requestJson(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body || {}),
-    }).then(function (r) { return r.json() });
+    });
   }
 
   document.getElementById('credsave').addEventListener('click', function () {
@@ -437,8 +464,7 @@
   document.getElementById('credclear').addEventListener('click', function () {
     if (!confirm('确定删除本机保存的快期账号密码？')) return;
     credBusy(true);
-    fetch('/dsh-quant-cta/api/credentials', { method: 'DELETE' })
-      .then(function (r) { return r.json() })
+    requestJson('/dsh-quant-cta/api/credentials', { method: 'DELETE' })
       .then(function (d) { credBusy(false); renderCredStatus(d); credMsg('已清除本机凭据。'); })
       .catch(function (e) { credBusy(false); credMsg('清除失败：' + String(e), 'bad-text') });
   });
@@ -498,18 +524,17 @@
   }
 
   function loadSim() {
-    fetch('/dsh-quant-cta/api/sim', { cache: 'no-store' })
-      .then(function (r) { return r.json() })
+    requestJson('/dsh-quant-cta/api/sim')
       .then(renderSim)
-      .catch(function (e) { simMsg('读取失败：' + String(e), 'bad-text') });
+      .catch(function (e) { simMsg('读取失败：' + (e && e.message ? e.message : String(e)), 'bad-text') });
   }
 
   function simPost(body) {
-    return fetch('/dsh-quant-cta/api/sim', {
+    return requestJson('/dsh-quant-cta/api/sim', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body || {}),
-    }).then(function (r) { return r.json() });
+    });
   }
 
   document.getElementById('simadvance').addEventListener('click', function () {
@@ -539,8 +564,7 @@
   document.getElementById('runs').addEventListener('change', function (ev) {
     var id = ev.target.value;
     if (!id) return;
-    fetch('/dsh-quant-cta/api/report?run=' + encodeURIComponent(id), { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
+    requestJson('/dsh-quant-cta/api/report?run=' + encodeURIComponent(id))
       .then(function (d) { renderRun(d); })
       .catch(function () { /* ignore */ });
   });

@@ -2,6 +2,16 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.1] - 2026-11-09
+
+### 修复
+
+- 面板在宿主端还是旧版本时，会直接抛 `SyntaxError: Unexpected end of JSON input`
+  （`/api/sim`、`/api/credentials` 返回 404 + "not found"，`r.json()` 解析失败）。
+  现在统一走 `requestJson`：非 2xx 或非 JSON 都翻译成
+  「接口不可用（HTTP 404）：插件宿主端还是旧版本，重启 DSH 后再刷新本页」
+- 面板里的 8 处 `fetch` 全部收口到一个函数，错误提示不再泄漏解析异常
+
 ## [0.4.0] - 2026-11-09
 
 ### 新增
