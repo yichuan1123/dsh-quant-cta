@@ -107,8 +107,10 @@ def resolve_pool(names) -> list:
         items = [p.strip() for p in names.split(",") if p.strip()]
         if not items:
             return list(DEFAULT_POOL)
-        if len(items) == 1 and items[0] in ("default", "all"):
+        if len(items) == 1 and items[0] == "default":
             return list(DEFAULT_POOL)
+        if len(items) == 1 and items[0] == "all":
+            return sorted(SPECS.keys())
         if len(items) == 1 and items[0] == "starter":
             return list(STARTER_POOL)
         return items

@@ -92,6 +92,20 @@
   </section>
 
   <section>
+    <h2>最优配比与模拟调度</h2>
+    <div class="card">
+      <div id="simstatus" class="note" style="margin:0 0 10px">读取中…</div>
+      <div class="formrow">
+        <button id="simadvance">推进一次</button>
+        <button id="simstart">每 5 分钟自动推进</button>
+        <button id="simstop">停止自动</button>
+      </div>
+      <div id="simmsg" class="note"></div>
+    </div>
+    <div id="model"></div>
+  </section>
+
+  <section>
     <h2>模拟盘</h2>
     <div id="paper"></div>
   </section>
@@ -322,6 +336,7 @@
     }
     renderPaper(ov.paper);
     loadCredentials();
+    loadSim();
   }
 
   function load() {
@@ -426,6 +441,98 @@
       .then(function (r) { return r.json() })
       .then(function (d) { credBusy(false); renderCredStatus(d); credMsg('已清除本机凭据。'); })
       .catch(function (e) { credBusy(false); credMsg('清除失败：' + String(e), 'bad-text') });
+  });
+
+  /* ---------- 最优配比与模拟调度 ---------- */
+
+  function simMsg(text, cls) {
+    var host = document.getElementById('simmsg');
+    host.textContent = text || '';
+    host.className = 'note' + (cls ? ' ' + cls : '');
+  }
+
+  function renderModel(m) {
+    var host = document.getElementById('model');
+    host.innerHTML = '';
+    if (!m) {
+      host.appendChild(el('div', 'empty', '还没有模型状态。点「推进一次」或跑一次回测就会生成最优配比。'));
+      return;
+    }
+    var d = m.diagnostics || {};
+    var grid = el('div', 'grid');
+    grid.appendChild(card('优化方法', String(m.method || '—')));
+    grid.appendChild(card('模型版本', 'v' + (m.version === undefined ? '—' : m.version)));
+    grid.appendChild(card('估算截至', String(m.asof || '—')));
+    grid.appendChild(card('有效品种数', d.effective_n === undefined ? '—' : String(d.effective_n)));
+    grid.appendChild(card('组合波动', pct(d.ann_vol_pct)));
+    host.appendChild(grid);
+
+    var rows = Object.keys(m.weights || {}).map(function (k) {
+      return { code: k, w: m.weights[k], rc: (d.risk_contributions || {})[k] };
+    }).sort(function (a, b) { return b.w - a.w; });
+
+    host.appendChild(table(rows, [
+      { label: '品种', get: function (r) { return r.code; } },
+      { label: '权重', num: true, get: function (r) { return pct(r.w * 100); } },
+      { label: '风险贡献', num: true, get: function (r) { return r.rc === undefined ? '—' : pct(r.rc); } }
+    ]));
+    if (d.sector_totals_pct) {
+      var parts = Object.keys(d.sector_totals_pct).map(function (k) { return k + ' ' + pct(d.sector_totals_pct[k]); });
+      var n = el('div', 'note', '板块权重：' + parts.join('　'));
+      host.appendChild(n);
+    }
+  }
+
+  function renderSim(s) {
+    var host = document.getElementById('simstatus');
+    host.innerHTML = '';
+    if (!s) { host.appendChild(el('span', null, '—')); return; }
+    if (s.running) host.appendChild(el('span', 'ok-text', '● 自动推进中，每 ' + s.intervalSec + ' 秒'));
+    else host.appendChild(el('span', null, '○ 未启动自动推进'));
+    host.appendChild(el('span', null, '　累计推进 ' + (s.ticks || 0) + ' 次'));
+    if (s.last) {
+      host.appendChild(el('span', null, '　最近：' + s.last.at + ' → ' + (s.last.last_date || '—')));
+    }
+    if (s.lastError) host.appendChild(el('span', 'bad-text', '　错误：' + s.lastError));
+    renderModel(s.model);
+  }
+
+  function loadSim() {
+    fetch('/dsh-quant-cta/api/sim', { cache: 'no-store' })
+      .then(function (r) { return r.json() })
+      .then(renderSim)
+      .catch(function (e) { simMsg('读取失败：' + String(e), 'bad-text') });
+  }
+
+  function simPost(body) {
+    return fetch('/dsh-quant-cta/api/sim', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) { return r.json() });
+  }
+
+  document.getElementById('simadvance').addEventListener('click', function () {
+    simMsg('正在推进（会重算最优配比，可能需要几十秒）…');
+    simPost({ action: 'advance' }).then(function (d) {
+      if (!d.ok) { simMsg('推进失败：' + ((d.last && d.last.error) || '未知错误'), 'bad-text'); return }
+      simMsg('已推进到 ' + d.last.last_date + '（新增 ' + d.last.added_days + ' 个交易日，' + d.last.ms + 'ms）', 'ok-text');
+      renderSim(d.status);
+    }).catch(function (e) { simMsg('请求失败：' + String(e), 'bad-text') });
+  });
+
+  document.getElementById('simstart').addEventListener('click', function () {
+    simPost({ action: 'start', intervalSec: 300 }).then(function (d) {
+      simMsg('已启动自动推进（每 5 分钟）。DSH 重启后定时器会清空。', 'ok-text');
+      renderSim(d.status);
+    }).catch(function (e) { simMsg('启动失败：' + String(e), 'bad-text') });
+  });
+
+  document.getElementById('simstop').addEventListener('click', function () {
+    simPost({ action: 'stop' }).then(function (d) {
+      simMsg('已停止自动推进。', 'ok-text');
+      renderSim(d.status);
+    }).catch(function (e) { simMsg('停止失败：' + String(e), 'bad-text') });
   });
 
   document.getElementById('refresh').addEventListener('click', load);

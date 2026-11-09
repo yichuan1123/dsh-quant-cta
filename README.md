@@ -19,7 +19,10 @@
 | 绩效归因 | [python/qcta/metrics.py](python/qcta/metrics.py) | CAGR/夏普/回撤/卡玛/PF/月度矩阵/分策略/分品种 |
 | 报告输出 | [python/qcta/report.py](python/qcta/report.py) | Markdown + JSON + 手写 SVG 曲线 |
 | 模拟盘 | [python/qcta/paper.py](python/qcta/paper.py) | 逐日推进的可断点账本 + 前瞻日志 |
-| DSH 工具 | [lib/index.js](lib/index.js) | qcta_doctor / qcta_data / qcta_backtest / qcta_report / qcta_paper |
+| DSH 工具 | [lib/index.js](lib/index.js) | qcta_doctor / qcta_data / qcta_backtest / qcta_report / qcta_paper / qcta_sim |
+| 最优配比 | [optimizer.py](python/qcta/optimizer.py) | 等权 / 波动率倒数 / ERC 风险平价 / 最小方差 / 均值方差（带 Ledoit-Wolf 收缩） |
+| 滚动模型 | [model.py](python/qcta/model.py) | 调仓日重估权重（walk-forward），状态落盘可追溯 |
+| 模拟调度 | [lib/index.js](lib/index.js) | DSH 按间隔定时推进 paper 账本，状态回流工具与面板 |
 | Web 面板 | [panel.html](panel.html) | /dsh-quant-cta/panel |
 | 客户端半身 | [client/client.js](client/client.js) | 在「开始」列表注册入口 + 右侧栏 tab（同源 iframe 套面板） |
 
@@ -84,6 +87,8 @@ python -m qcta auth logout     # 删除本机凭据
 
 ```
 qcta_doctor                                   # 先自检
+qcta_sim    action="status"                    # 模拟调度 + 最新最优配比
+qcta_sim    action="advance"                   # 推进一天并重算配比
 qcta_data   action="sync" live=true           # 拉真实行情
 qcta_backtest pool="default" start="2019-01-01" live=true
 qcta_report action="get"
@@ -105,6 +110,8 @@ qcta_paper  action="init"; qcta_paper action="step"
 | `POST /dsh-quant-cta/api/credentials` | 保存账号密码（并可选验证连通） |
 | `DELETE /dsh-quant-cta/api/credentials` | 删除本机凭据 |
 | `POST /dsh-quant-cta/api/credentials/test` | 只测连通、不保存 |
+| `GET /dsh-quant-cta/api/sim` | 模拟调度状态 + 最新模型权重 |
+| `POST /dsh-quant-cta/api/sim` | 推进一次 / 启动定时 / 停止 |
 | `GET /dsh-quant-cta/panel` | 面板页面 |
 
 ### 命令行
@@ -145,7 +152,7 @@ python -m qcta paper step --live
 ## 开发
 
 ```bash
-python -m unittest discover -s python/tests -t python   # 43 个单测
+python -m unittest discover -s python/tests -t python   # 78 个单测
 node --check lib/index.js                              # 插件语法
 node tools/smoke.mjs                                   # 插件冒烟（假 ctx + 真引擎）
 cd python && python -m qcta backtest --pool starter --start 2021-01-01 --name ci_run

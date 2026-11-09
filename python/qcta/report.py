@@ -71,6 +71,44 @@ def render_markdown(result, meta=None):
     a("> 成本是策略的重力。毛收益若在 5% 以下，扣完成本基本归零。")
     a("")
 
+    mh = getattr(result, "model_history", None) or []
+    if mh:
+        latest = mh[-1]
+        d = latest.get("diagnostics", {})
+        a("## 最优配比（滚动重估）")
+        a("")
+        a("| 项目 | 值 |")
+        a("|---|---|")
+        a("| 方法 | %s |" % latest.get("method"))
+        a("| 重估次数 | %d |" % len(mh))
+        a("| 最近重估日 | %s |" % latest.get("asof"))
+        a("| 品种数 / 有效品种数 | %s / %s |" % (d.get("n"), d.get("effective_n")))
+        a("| 组合年化波动 | %s |" % _p(d.get("ann_vol_pct")))
+        a("| 观测天数 / 单品种上限 | %s / %s |" % (d.get("observations"), _p((d.get("max_weight_cap") or 0) * 100)))
+        a("")
+        w = latest.get("weights", {})
+        rc = d.get("risk_contributions", {})
+        ranked = sorted(w.items(), key=lambda kv: -kv[1])[:12]
+        a("| 品种 | 权重 | 风险贡献 |")
+        a("|---|---|---|")
+        for code, weight in ranked:
+            a("| %s | %s | %s |" % (code, _p(weight * 100), _p(rc.get(code))))
+        if len(w) > 12:
+            a("| …(其余 %d 个) | %s | — |" % (len(w) - 12, _p(sum(v for _, v in sorted(w.items(), key=lambda kv: -kv[1])[12:]) * 100)))
+        if d.get("sector_totals_pct"):
+            a("")
+            a("板块权重：" + "　".join("%s %s" % (k, _p(v)) for k, v in d["sector_totals_pct"].items()))
+        if len(mh) > 1:
+            first = mh[0].get("weights", {})
+            codes = set(first) | set(w)
+            drift = sorted(((abs(w.get(c, 0) - first.get(c, 0)), c) for c in codes), reverse=True)[:5]
+            a("")
+            a("权重漂移最大的品种（首次重估 → 最近）：")
+            for delta, code in drift:
+                a("  %s：%s → %s（Δ %s）" % (code, _p(first.get(code, 0) * 100),
+                                           _p(w.get(code, 0) * 100), _p(delta * 100)))
+        a("")
+
     a("## 策略腿归因")
     a("")
     a("| 策略腿 | 策略 | 资金占比 | 期末权益 | 收益 | 夏普 | 最大回撤 | 交易数 |")
@@ -194,7 +232,21 @@ def write_reports(out_dir, result, meta=None):
             "max_drawdown_halt": result.cfg.max_drawdown_halt,
             "max_symbol_risk": result.cfg.max_symbol_risk,
             "sleeves": [{"name": s.name, "strategy": s.strategy.name, "alloc": s.alloc} for s in result.sleeves],
+            "sizing": getattr(result.cfg, "sizing", "vol_parity"),
+            "model_method": getattr(result.cfg, "model_method", None),
+            "model_rebalance": getattr(result.cfg, "model_rebalance", None),
         },
+        "model": (
+            {
+                "rebalances": len(result.model_history),
+                "latest": result.model_history[-1],
+                "series": [
+                    {"version": s.get("version"), "asof": s.get("asof"), "weights": s.get("weights", {})}
+                    for s in result.model_history[-40:]
+                ],
+            }
+            if getattr(result, "model_history", None) else None
+        ),
         "metrics": result.metrics,
         "sleeves": attribution_by_sleeve(result.sleeves),
         "symbols": attribution_by_symbol(result.trades),

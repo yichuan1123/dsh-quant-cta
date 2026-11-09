@@ -123,4 +123,14 @@ class EngineConfig:
     max_symbol_risk: float = 0.02           # 单品种最大风险占权益
     stop_atr: float = 0.0                   # ATR 止损倍数，0=关闭
     risk_free: float = 0.0
+    # ── 配比 / 模型 ──────────────────────────────────────
+    sizing: str = "vol_parity"              # vol_parity（按策略给的权重）| optimizer（最优配比）
+    model_method: str = "risk_parity"       # equal_weight|inverse_vol|risk_parity|min_variance|mean_variance
+    model_lookback: int = 250               # 估计协方差用的交易日数
+    model_rebalance: int = 20               # 每多少个交易日重估一次
+    model_max_weight: float = 0.15          # 单品种权重上限
+    model_sector_cap: float = 0.35          # 板块权重上限
+    model_min_bars: int = 250               # 进入品种池所需的最少历史
+    model_exclude_sectors: tuple = ()       # 例如 ("金融",)
+    risk_weights: dict = None               # 显式指定权重（优先级最高，paper/外部传入用）
     sleeves: tuple = ()
