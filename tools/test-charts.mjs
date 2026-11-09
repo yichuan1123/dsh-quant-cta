@@ -313,6 +313,11 @@ assert(heatCells.every((c) => /hsl\(214/.test(String(c.attrs.fill)) || /rgba/.te
 assert(all(heatSvg, 'text').some((t) => String(t.textContent) === 'rb'), '纵轴标出品种名')
 assert(all(heatSvg, 'text').some((t) => String(t.textContent).indexOf('滚轮缩放') >= 0), '提示了缩放操作')
 
+C.renderNoModel()
+const noModelKids = registry.model.children.map((c) => String(c.textContent)).join(' ')
+assert(noModelKids.indexOf('vol_parity') >= 0,
+  '没启用 optimizer 的回测：模型区给出说明而不是留着上一份的图（实际：“' + noModelKids.slice(0, 40) + '”）')
+
 const heatEmpty = node('div')
 C.drawWeightHeat(heatEmpty, { series: [] })
 assert(heatEmpty.children.length >= 1 && String(heatEmpty.children[0].textContent).indexOf('权重') >= 0,

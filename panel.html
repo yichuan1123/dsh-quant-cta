@@ -606,6 +606,8 @@
       var series = root.model.series.slice();
       series.__skipped = root.model.series_skipped || 0;
       renderModel(root.model.latest || null, series);
+    } else {
+      renderNoModel();
     }
 
     var tHost = document.getElementById('trades');
@@ -1935,6 +1937,22 @@
     return parts.join('　·　');
   }
 
+  /** 切到一份没启用 optimizer 的回测时，清掉上一份的模型图并说明原因 */
+  function renderNoModel() {
+    var mHost = document.getElementById('model');
+    if (mHost) {
+      clearHost(mHost);
+      mHost.appendChild(el('div', 'empty',
+        '这次回测用的是固定权重（vol_parity），没有模型配比历史。用 --sizing optimizer 跑一次就能看到权重演化。'));
+    }
+    ['donut', 'donutlegend', 'sectorbar'].forEach(function (id) {
+      var h = document.getElementById(id);
+      if (h) clearHost(h);
+    });
+    var cons = document.getElementById('constraints');
+    if (cons) cons.textContent = '这次回测没有启用 optimizer 配比。';
+  }
+
   /** 报告里可能有不少「预热期没有权重」的快照，被后端跳过了，这里给个数 */
   function opts_skipped_note(series, n) {
     var skipped = (typeof series === 'object' && series && series.__skipped) || 0;
@@ -2185,6 +2203,7 @@
   window.__dshQuantCtaCharts = {
     drawLine: drawLine, drawDonut: drawDonut, drawBars: drawBars, drawSectorBars: drawSectorBars,
     drawMultiLine: drawMultiLine, cumSeries: cumSeries, drawWeightHeat: drawWeightHeat,
+    renderNoModel: renderNoModel,
     zoomState: zoomState, windowPositions: windowPositions,
     niceTicks: niceTicks, colorMap: colorMap, sectorColor: sectorColor, constraintsText: constraintsText,
     fmtAxis: fmtAxis, lttb: lttb, timeTicks: timeTicks, rollingVol: rollingVol, hostWidth: hostWidth,
