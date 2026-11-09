@@ -81,6 +81,7 @@ class SaveLoadTests(unittest.TestCase):
     def test_roundtrip(self):
         import tempfile
         d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
         p = os.path.join(d, "costs.json")
         costs.save_costs({"rb": {"slip_ticks": 1.0}}, path=p)
         self.assertEqual(costs.load_costs(p)["rb"]["slip_ticks"], 1.0)

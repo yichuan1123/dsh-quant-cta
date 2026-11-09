@@ -81,11 +81,13 @@ class CrossSectionTests(unittest.TestCase):
 class StorageTests(unittest.TestCase):
     def test_save_load_roundtrip(self):
         d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
         carry.save_term("rb", {"SHFE.rb1605": {"2020-01-02": 1.0}}, term_dir=d)
         self.assertEqual(carry.load_term("rb", term_dir=d)["SHFE.rb1605"]["2020-01-02"], 1.0)
 
     def test_load_all_skips_missing(self):
         d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
         carry.save_term("rb", {"SHFE.rb1605": {"2020-01-02": 100.0},
                                "SHFE.rb1610": {"2020-01-02": 104.0}}, term_dir=d)
         got = carry.load_all(["rb", "i"], term_dir=d)

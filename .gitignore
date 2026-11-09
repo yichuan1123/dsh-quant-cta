@@ -20,3 +20,7 @@ credentials*.bak
 # Node
 node_modules/
 *.log
+
+# 测试用 tempfile.mkdtemp 落在仓内时（TMP 指向仓）产生的目录
+tmp*/
+data/raw/
