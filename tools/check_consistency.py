@@ -40,7 +40,7 @@ def main():
         ("品种规格表条数", n_specs, 28, "28 个品种" in readme),
         ("插件工具数", n_tools, 6, tools_all),
         ("Web 路由数", n_routes, 6, routes_all),
-        ("单元测试数", n_tests, 78, "78 个单测" in readme),
+        ("单元测试数", n_tests, 81, "81 个单测" in readme),
     ]
 
     ok = True

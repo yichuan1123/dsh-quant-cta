@@ -50,7 +50,10 @@ const sandbox = {
     createElement: (t) => node(t),
     createElementNS: (_ns, t) => node(t),
     getElementById: (id) => registry[id] || node('div'),
+    querySelectorAll: () => [],        // 区间按钮：测试里不绑也行
+    querySelector: () => null,
   },
+  localStorage: undefined,             // 参数持久化在测试环境里降级为内存默认值
   fetch: () => new Promise(() => {}),   // 永远 pending：只验证图表，不触发网络
   setTimeout,
   confirm: () => false,
@@ -150,6 +153,48 @@ assert(all(svg4, 'path').length >= 1, '累计虚线存在')
 const host5 = node('div')
 C.drawLine(host5, { points: [] })
 assert(all(host5, 'text').length === 1, '空数据折线图给出占位文本')
+
+/* ── 7. 降采样：保形 ── */
+const series = []
+for (let i = 0; i < 2000; i++) {
+  let y = 1000000 + i * 10
+  if (i === 1200) y += 180000        // 一个尖峰，降采样不许把它抹掉
+  series.push({ x: '2024-01-01', y })
+}
+const sampled = C.lttb(series, 300)
+assert(sampled.length <= 302, 'LTTB 把 2000 点压到 ~300 点（实际 ' + sampled.length + '）')
+assert(sampled[0] === series[0] && sampled[sampled.length - 1] === series[series.length - 1], 'LTTB 保留首尾点')
+assert(Math.max.apply(null, sampled.map((p) => p.y)) >= 1000000 + 1200 * 10 + 170000, 'LTTB 保住了尖峰（不被抹平）')
+
+/* ── 8. 时间刻度：跨年标年份 ── */
+const multiYear = []
+for (let y = 2019; y <= 2026; y++) for (let m = 1; m <= 3; m++) multiYear.push({ x: y + '-0' + m + '-01', y: 1 })
+const yTicks = C.timeTicks(multiYear, 6)
+assert(yTicks.length >= 2 && yTicks.every((t) => String(t.label).length === 4), '跨年时刻度是年份标签')
+
+/* ── 9. 滚动波动率 ── */
+const rets = []
+for (let i = 0; i < 60; i++) rets.push({ label: '2024-01-' + String(1 + (i % 28)).padStart(2, '0'), value: (i % 2 ? 1 : -1) * 0.5 })
+const vol = C.rollingVol(rets, 20)
+assert(vol.length === 60 && vol[0].y === 0 && vol[19].y === 0, '滚动波动率预热期为 0')
+assert(vol[40].y > 0, '预热后波动率为正（' + vol[40].y.toFixed(2) + '%）')
+
+/* ── 10. 叠加线与副轴 ── */
+const host6 = node('div')
+const ovPts = pts.map((p, i) => ({ x: p.x, y: 1000000 + i * 900 }))
+const secPts = pts.map((p) => ({ x: p.x, y: 8 + Math.random() }))
+C.drawLine(host6, {
+  points: pts, color: '#5b8cff', height: 240,
+  overlay: [{ points: ovPts, color: '#f0b429', label: '期望路径 10%' }],
+  secondary: { points: secPts, unit: '%', label: '波动' },
+})
+const svg6 = host6.children[0]
+const dashed = all(svg6, 'path').filter((p) => String(p.attrs['stroke-dasharray'] || '').includes('5'))
+assert(dashed.length >= 1, '期望路径画成虚线叠加')
+assert(all(svg6, 'text').some((t) => String(t.textContent).indexOf('期望路径') >= 0), '叠加线有标签')
+assert(all(svg6, 'text').some((t) => String(t.textContent).indexOf('波动') >= 0), '副轴有标签')
+const dots = all(svg6, 'circle')
+assert(dots.length >= 3, '画了极值/末值标记（' + dots.length + ' 个点）')
 
 if (failures > 0) {
   console.error('\n' + failures + ' 项失败')

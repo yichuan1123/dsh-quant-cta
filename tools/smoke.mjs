@@ -123,7 +123,9 @@ try {
   assert(saved.json !== null && saved.json.ok === true, 'POST credentials 保存成功')
   assert(saved.json.status && saved.json.status.masked_user.indexOf('***') >= 0, '返回的是脱敏账号')
   assert(!saved.text.includes(DUMMY_PASS), '响应体里没有明文密码')
-  assert(!saved.text.includes(DUMMY_USER), '响应体里没有完整账号')
+  // 账号是有意返回的（面板要回填输入框），但脱敏版必须同时存在
+  assert(saved.text.includes(DUMMY_USER), '响应体带完整账号（供面板回填）')
+  assert(saved.text.includes('***'), '响应体同时给出脱敏账号')
 
   const after = await getJson('/dsh-quant-cta/api/credentials')
   assert(after.json.configured === true && after.json.source === 'file', '保存后状态为已配置(file)')

@@ -17,6 +17,7 @@ import math
 import os
 import random
 
+from .secrets import SCHEME_DPAPI, SCHEME_PLAIN, protect, unprotect
 from .specs import ContractSpec, get_spec
 from .types import Bar
 
@@ -105,8 +106,14 @@ def load_credentials():
             with open(path, "r", encoding="utf-8") as fh:
                 obj = json.load(fh)
             u = obj.get("tq_user") or obj.get("user")
-            p = obj.get("tq_pass") or obj.get("password")
-            if u and p:
+            if not u:
+                return None
+            enc = obj.get("enc")
+            if obj.get("tq_pass_enc"):
+                p = unprotect(obj["tq_pass_enc"], enc or "dpapi-v1")
+            else:
+                p = obj.get("tq_pass") or obj.get("password")
+            if p:
                 return (str(u), str(p))
         except Exception:
             return None
@@ -122,17 +129,24 @@ def mask_user(user: str) -> str:
 
 
 def credentials_status() -> dict:
-    """凭据状态。**绝不返回密码**，只返回脱敏账号与来源。"""
+    """凭据状态。
+
+    **绝不返回密码**。账号（user）会明文返回，因为面板要回填输入框——
+    这个接口只在本机回环 + 同源下可访问（宿主端有 isLocalRequest 校验）；
+    需要展示给人看的场景一律用 masked_user。
+    """
     env_user = os.environ.get("QCTA_TQ_USER") or os.environ.get("TQ_USER")
     env_pass = os.environ.get("QCTA_TQ_PASS") or os.environ.get("TQ_PASS")
     path = credentials_path()
     file_exists = os.path.exists(path)
     file_user = None
+    storage = None
     if file_exists:
         try:
             with open(path, "r", encoding="utf-8") as fh:
                 obj = json.load(fh)
             file_user = obj.get("tq_user") or obj.get("user")
+            storage = obj.get("enc") or (SCHEME_PLAIN if obj.get("tq_pass") else None)
         except Exception:
             file_user = None
 
@@ -147,6 +161,9 @@ def credentials_status() -> dict:
         "configured": bool(source),
         "source": source,
         "masked_user": mask_user(user) if user else "",
+        # 面板要用它回填账号输入框（不回填密码）。只在本机回环+同源下可取。
+        "user": user or "",
+        "storage": storage if source == "file" else ("env" if source == "env" else None),
         "path": path,
         "file_exists": file_exists,
         "env_present": bool(env_user and env_pass),
@@ -161,11 +178,16 @@ def save_credentials(user: str, password: str) -> dict:
         raise ValueError("账号和密码都不能为空")
     path = credentials_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    stored, scheme = protect(p)
     payload = {
         "tq_user": u,
-        "tq_pass": p,
+        "enc": scheme,
         "saved_at": _dt.datetime.now().isoformat(timespec="seconds"),
     }
+    if scheme == SCHEME_DPAPI:
+        payload["tq_pass_enc"] = stored
+    else:
+        payload["tq_pass"] = stored
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False)

@@ -57,6 +57,8 @@
   .cap { color: var(--warn); }
   .chip { font-size: 10.5px; padding: 1px 6px; border-radius: 999px; border: 1px solid #4a3d1a;
           background: #221c0f; color: var(--warn); margin-left: 6px; }
+  .fieldlabel { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--muted); }
+  .fieldlabel .inp { min-width: 150px; }
   .tabbtn { padding: 4px 11px; font-size: 12px; }
   .tabbtn.on { border-color: #35507f; background: #16203a; color: #cfe0ff; }
   .axis text { fill: #8a8a99; font-size: 10px; font-variant-numeric: tabular-nums; }
@@ -83,7 +85,34 @@
   <div id="warn"></div>
   <div class="grid" id="cards"></div>
   <section>
+    <h2>资金与预期</h2>
+    <div class="card">
+      <div class="formrow">
+        <label class="fieldlabel">模拟投入金额（元）
+          <input id="p-capital" class="inp" type="number" min="10000" step="10000" value="1000000">
+        </label>
+        <label class="fieldlabel">期望年化回报（%）
+          <input id="p-target" class="inp" type="number" min="0" max="100" step="0.5" value="10">
+        </label>
+        <label class="fieldlabel">风险阈值 · 最大可接受回撤（%）
+          <input id="p-maxdd" class="inp" type="number" min="1" max="90" step="1" value="20">
+        </label>
+        <button id="p-reset">恢复默认</button>
+      </div>
+      <div class="note">这三项只影响面板的换算与告警，不改历史回测；会存在本机（localStorage），下次打开自动带出。</div>
+    </div>
+    <div class="grid" id="expectcards" style="margin-top:12px"></div>
+    <div id="expectnote" class="note"></div>
+  </section>
+
+  <section>
     <h2>净值与回撤</h2>
+    <div class="formrow" style="margin-bottom:8px">
+      <span class="k" style="font-size:11.5px;color:var(--muted)">时间范围</span>
+      <button class="tabbtn on" data-range="all">全部</button>
+      <button class="tabbtn" data-range="3y">近 3 年</button>
+      <button class="tabbtn" data-range="1y">近 1 年</button>
+    </div>
     <div class="curve"><div id="chart"></div></div>
     <div class="curve" style="margin-top:10px"><div id="chart2"></div></div>
     <div class="note" id="chartnote"></div>
@@ -230,6 +259,100 @@
     return c;
   }
 
+  /* ---------- 资金与预期参数（本机持久化） ---------- */
+
+  var PARAMS = { capital: 1000000, target: 10, maxdd: 20 };
+  var RANGE = 'all';
+  var LAST_RUN = null;
+
+  function loadParams() {
+    try {
+      var raw = window.localStorage ? window.localStorage.getItem('qcta.params') : null;
+      if (raw) {
+        var o = JSON.parse(raw);
+        if (o && typeof o.capital === 'number') PARAMS.capital = o.capital;
+        if (o && typeof o.target === 'number') PARAMS.target = o.target;
+        if (o && typeof o.maxdd === 'number') PARAMS.maxdd = o.maxdd;
+      }
+    } catch (e) { /* 读不到就用默认 */ }
+  }
+
+  function persistParams() {
+    try {
+      if (window.localStorage) window.localStorage.setItem('qcta.params', JSON.stringify(PARAMS));
+    } catch (e) { /* 隐私模式写不进去，忽略 */ }
+  }
+
+  function syncParamInputs() {
+    var c = document.getElementById('p-capital');
+    var t = document.getElementById('p-target');
+    var m = document.getElementById('p-maxdd');
+    if (c) c.value = String(PARAMS.capital);
+    if (t) t.value = String(PARAMS.target);
+    if (m) m.value = String(PARAMS.maxdd);
+  }
+
+  /** 把曲线裁到选定区间。 */
+  function sliceRange(curve) {
+    if (!curve || curve.length === 0 || RANGE === 'all') return curve || [];
+    var days = RANGE === '1y' ? 252 : 252 * 3;
+    return curve.length <= days ? curve : curve.slice(curve.length - days);
+  }
+
+  /**
+   * 资金与预期体检。
+   * 只做**确定性换算**（复利、回撤对照、按权重分钱），不预测未来收益率。
+   */
+  function renderExpectation(run) {
+    var host = document.getElementById('expectcards');
+    var note = document.getElementById('expectnote');
+    if (!host) return;
+    var m = (run && run.metrics) || {};
+    clearHost(host);
+    if (!m.cagr_pct && m.cagr_pct !== 0) {
+      host.appendChild(card('模拟投入金额', money(PARAMS.capital)));
+      if (note) note.textContent = '还没有回测结果，先跑一次回测或推进模拟盘。';
+      return;
+    }
+    var years = (m.trading_days || 0) / 252 || 1;
+    var cap = PARAMS.capital;
+    var target = PARAMS.target / 100;
+    var maxdd = PARAMS.maxdd / 100;
+
+    var expectEnd = cap * Math.pow(1 + target, years);
+    var actualEnd = cap * (1 + (m.total_return_pct || 0) / 100);
+    var gapPct = (m.cagr_pct || 0) - PARAMS.target;
+    var ddOk = (m.max_drawdown_pct || 0) <= PARAMS.maxdd;
+
+    host.appendChild(card('投入金额', money(cap)));
+    host.appendChild(card('期望期末（' + years.toFixed(1) + ' 年 @' + PARAMS.target + '%）', money(expectEnd)));
+    host.appendChild(card('同金额实际期末', money(actualEnd)));
+    host.appendChild(card('年化差（实际 − 期望）', (gapPct >= 0 ? '+' : '') + gapPct.toFixed(2) + '%',
+      gapPct >= 0 ? 'up' : 'down'));
+    host.appendChild(card('实际最大回撤', pct(m.max_drawdown_pct), ddOk ? '' : 'down'));
+    host.appendChild(card('风险阈值', pct(PARAMS.maxdd), ''));
+
+    var lines = [];
+    if (gapPct >= 0) {
+      lines.push('年化 ' + (m.cagr_pct || 0).toFixed(2) + '% 达到/超过你设的 ' + PARAMS.target +
+        '% 期望；但这是历史回测值，不是承诺。');
+    } else {
+      lines.push('年化 ' + (m.cagr_pct || 0).toFixed(2) + '% 低于你设的 ' + PARAMS.target + '% 期望，差 ' +
+        Math.abs(gapPct).toFixed(2) + ' 个百分点。要么降期望，要么提高风险预算（target_vol）。');
+    }
+    if (ddOk) {
+      lines.push('最大回撤 ' + (m.max_drawdown_pct || 0).toFixed(2) + '% 在 ' + PARAMS.maxdd + '% 阈值内。');
+    } else {
+      lines.push('⚠ 最大回撤 ' + (m.max_drawdown_pct || 0).toFixed(2) + '% 已越过你设的 ' + PARAMS.maxdd +
+        '% 阈值——按这个阈值，实盘会在中途被你自己叫停。');
+    }
+    if (PARAMS.maxdd < 20) {
+      lines.push('注意：你的阈值（' + PARAMS.maxdd + '%）比引擎熔断线（20%）更严，' +
+        '真跑之前建议把 qcta_backtest 的 dd_halt 调到 ' + (PARAMS.maxdd / 100).toFixed(2) + '，否则账面会先触发熔断。');
+    }
+    if (note) note.textContent = lines.join(' ');
+  }
+
   function drawCurve(curve) {
     var host = document.getElementById('chart');
     var host2 = document.getElementById('chart2');
@@ -241,15 +364,23 @@
       return;
     }
     LAST_CURVE = curve;
+    var view = sliceRange(curve);
+    // 期望路径：从本区间起点按期望年化复利外推，作为斜率参照（不是预测）
+    var startEq = view[0].equity;
+    var years = view.length / 252;
+    var overlayPts = view.map(function (p, i) {
+      return { x: p.date, y: startEq * Math.pow(1 + PARAMS.target / 100, (i / Math.max(1, view.length - 1)) * years) };
+    });
     drawLine(host, {
-      points: curve.map(function (p) { return { x: p.date, y: p.equity }; }),
+      points: view.map(function (p) { return { x: p.date, y: p.equity }; }),
       color: COLORS.accent, height: 240, label: '权益曲线',
       tipFormat: function (v) { return money(v); },
+      overlay: [{ points: overlayPts, color: COLORS.warn, label: '期望路径 ' + PARAMS.target + '%' }],
     });
     drawLine(host2, {
-      points: curve.map(function (p) { return { x: p.date, y: -p.drawdown * 100 }; }),
+      points: view.map(function (p) { return { x: p.date, y: -p.drawdown * 100 }; }),
       color: COLORS.down, height: 150, unit: '%', label: '回撤曲线',
-      threshold: -20, thresholdLabel: '熔断线 -20%',
+      threshold: -PARAMS.maxdd, thresholdLabel: '你的风险阈值 -' + PARAMS.maxdd + '%',
       tipFormat: function (v) { return '回撤 ' + (-v).toFixed(2) + '%'; },
     });
     if (note) {
@@ -259,6 +390,20 @@
         ' · 最大回撤 ' + (peak * 100).toFixed(2) + '%（红线为熔断阈值）';
     }
     renderIntraday();
+  }
+
+  /** 滚动年化波动率（%）——用来看「这段行情的风险有没有变大」。 */
+  function rollingVol(items, win) {
+    var out = [];
+    for (var i = 0; i < items.length; i++) {
+      if (i < win) { out.push({ x: items[i].label, y: 0 }); continue; }
+      var seg = [];
+      for (var k = i - win + 1; k <= i; k++) seg.push(items[k].value);
+      var mu = seg.reduce(function (a, b) { return a + b; }, 0) / seg.length;
+      var v = Math.sqrt(seg.reduce(function (a, b) { return a + (b - mu) * (b - mu); }, 0) / (seg.length - 1));
+      out.push({ x: items[i].label, y: v * Math.sqrt(252) });
+    }
+    return out;
   }
 
   /* ---------- 分时走势（日频）：逐日收益柱 / 权益折线 ---------- */
@@ -276,23 +421,30 @@
       if (title) title.textContent = '逐日收益（日频）';
       return;
     }
+    var view = sliceRange(LAST_CURVE);
     if (INTRADAY_MODE === 'returns') {
       var items = [];
-      for (var i = 1; i < LAST_CURVE.length; i++) {
-        var a = LAST_CURVE[i - 1].equity;
-        var b = LAST_CURVE[i].equity;
-        items.push({ label: LAST_CURVE[i].date, value: a > 0 ? (b / a - 1) * 100 : 0 });
+      for (var i = 1; i < view.length; i++) {
+        var a = view[i - 1].equity;
+        var b = view[i].equity;
+        items.push({ label: view[i].date, value: a > 0 ? (b / a - 1) * 100 : 0 });
       }
       var wins = items.filter(function (x) { return x.value > 0; }).length;
+      var worst = 0;
+      for (var w = 0; w < items.length; w++) if (items[w].value < items[worst].value) worst = w;
       if (title) {
         title.textContent = '逐日收益（日频，' + items.length + ' 个交易日，上涨 ' + wins +
-          ' 天 / 下跌 ' + (items.length - wins) + ' 天；虚线为累计）';
+          ' 天 / 下跌 ' + (items.length - wins) + ' 天，最差单日 ' + items[worst].value.toFixed(2) +
+          '% @ ' + items[worst].label + '；虚线为累计，紫线为 20 日滚动波动率）';
       }
-      drawBars(host, { items: items, height: 210, cumulative: true });
+      drawBars(host, {
+        items: items, height: 210, cumulative: true,
+        secondary: { points: rollingVol(items, 20), color: '#9b6dff', unit: '%', label: '20日年化波动' },
+      });
     } else {
-      if (title) title.textContent = '权益走势（日频，共 ' + LAST_CURVE.length + ' 个交易日）';
+      if (title) title.textContent = '权益走势（日频，共 ' + view.length + ' 个交易日）';
       drawLine(host, {
-        points: LAST_CURVE.map(function (p) { return { x: p.date, y: p.equity }; }),
+        points: view.map(function (p) { return { x: p.date, y: p.equity }; }),
         color: COLORS.accent, height: 210, label: '权益走势',
         tipFormat: function (v) { return money(v); },
       });
@@ -349,6 +501,8 @@
     cards.appendChild(card('交易笔数', String(m.trades === undefined ? '—' : m.trades)));
     cards.appendChild(card('成本合计', money(m.cost_total)));
 
+    LAST_RUN = root;
+    renderExpectation(root);
     drawCurve(root.curve || []);
 
     var sleeveRows = Object.keys(root.sleeves || {}).map(function (k) {
@@ -462,6 +616,7 @@
 
   function renderCredStatus(d) {
     var host = document.getElementById('credstatus');
+    var userInput = document.getElementById('creduser');
     if (!d || d.ok === false) {
       host.innerHTML = '';
       host.appendChild(el('span', 'bad-text', '读取凭据状态失败：' + ((d && d.error) || '未知错误')));
@@ -469,11 +624,16 @@
     }
     host.innerHTML = '';
     if (d.configured) {
-      host.appendChild(el('span', 'ok-text', '● 已配置 ' + d.masked_user));
-      host.appendChild(el('span', null, '　来源：' + (d.source === 'env' ? '环境变量' : '本机文件') +
-        '　文件：' + d.path));
+      var how = d.storage === 'dpapi-v1' ? 'DPAPI 加密（仅本机本用户可解）'
+        : d.storage === 'plain' ? '明文存储（建议重存一次以启用加密）'
+        : d.source === 'env' ? '环境变量' : '本机文件';
+      host.appendChild(el('span', 'ok-text', '● 已记住 ' + d.masked_user));
+      host.appendChild(el('span', null, '　' + how));
+      // 账号回填（密码永不回填）；用户正在输入时不覆盖
+      if (userInput && !userInput.value && d.user) userInput.value = d.user;
     } else {
       host.appendChild(el('span', 'bad-text', '○ 未配置 —— 目前回测只能用合成数据'));
+      if (userInput) userInput.value = '';
     }
   }
 
@@ -660,7 +820,10 @@
     var step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
     var out = [];
     for (var v = Math.ceil(min / step) * step; v <= max + step * 1e-9; v += step) {
-      out.push(Math.round(v * 1e10) / 1e10);
+      var rv = Math.round(v * 1e10) / 1e10;
+      if (rv === 0) rv = 0;                       // 干掉 -0
+      // 相邻重复直接丢掉：累加误差会产生 0 与 -1e-16 这种，画出来就是两行 0.00%
+      if (out.length === 0 || Math.abs(rv - out[out.length - 1]) > Math.abs(step) * 1e-6) out.push(rv);
     }
     return out.length > 1 ? out : [min, max];
   }
@@ -673,11 +836,68 @@
     return String(Math.round(v));
   }
 
-  /** 动态折线图：权益/回撤序列 + 刻度 + 参考线 + 悬停十字线。 */
+  /**
+   * LTTB（Largest-Triangle-Three-Buckets）降采样：把几千个点压到几百个，
+   * 但保留峰谷形状——直接隔点取样会把尖顶抹平，看图的人会误判回撤。
+   */
+  function lttb(points, threshold) {
+    var n = points.length;
+    if (!threshold || threshold >= n || threshold <= 2) return points;
+    var sampled = [points[0]];
+    var every = (n - 2) / (threshold - 2);
+    var a = 0;
+    for (var i = 0; i < threshold - 2; i++) {
+      var avgStart = Math.floor((i + 1) * every) + 1;
+      var avgEnd = Math.min(Math.floor((i + 2) * every) + 1, n);
+      var avgX = 0, avgY = 0, cnt = 0;
+      for (var j = avgStart; j < avgEnd; j++) { avgX += j; avgY += points[j].y; cnt++; }
+      if (cnt === 0) { avgX = n - 1; avgY = points[n - 1].y; } else { avgX /= cnt; avgY /= cnt; }
+      var rs = Math.floor(i * every) + 1;
+      var re = Math.min(Math.floor((i + 1) * every) + 1, n);
+      var ax = a, ay = points[a].y;
+      var maxArea = -1, idx = rs;
+      for (var k = rs; k < re; k++) {
+        var area = Math.abs((ax - avgX) * (points[k].y - ay) - (ax - k) * (avgY - ay));
+        if (area > maxArea) { maxArea = area; idx = k; }
+      }
+      sampled.push(points[idx]);
+      a = idx;
+    }
+    sampled.push(points[n - 1]);
+    return sampled;
+  }
+
+  /** 智能时间刻度：跨年时标年份，一年内标月份。 */
+  function timeTicks(points, maxTicks) {
+    var out = [];
+    var n = points.length;
+    if (!n) return out;
+    var first = String(points[0].x), last = String(points[n - 1].x);
+    var spanYears = parseInt(last.slice(0, 4), 10) - parseInt(first.slice(0, 4), 10);
+    var want = maxTicks || 6;
+    if (spanYears >= 2) {
+      for (var i = 0; i < n; i++) {
+        var y = String(points[i].x).slice(0, 4);
+        if (out.length === 0 || out[out.length - 1].label !== y) out.push({ i: i, label: y });
+      }
+      if (out.length > want + 2) {
+        var step = Math.ceil(out.length / (want + 1));
+        out = out.filter(function (t, idx) { return idx % step === 0; });
+      }
+      return out;
+    }
+    var step2 = Math.max(1, Math.floor(n / want));
+    for (var k = 0; k < n; k += step2) out.push({ i: k, label: String(points[k].x).slice(5) });
+    return out;
+  }
+
+  /** 动态折线图：刻度 + 参考线 + 极值/末值标记 + 叠加线 + 副轴 + 悬停十字线。 */
   function drawLine(host, opts) {
     var W = 660, H = opts.height || 230;
     var pad = { l: 58, r: 16, t: 16, b: 24 };
-    var pts = opts.points || [];
+    if (opts.secondary) pad.r = 54;
+    var raw = opts.points || [];
+    var pts = lttb(raw, 800);
     var svg = makeSvg(host, W, H, opts.label || '折线图');
     if (pts.length < 2) {
       var t0 = svgEl('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle', fill: COLORS.muted, 'font-size': '12' });
@@ -711,12 +931,12 @@
       svg.appendChild(label);
     }
 
-    // X 轴：最多 6 个日期
-    var stepX = Math.max(1, Math.floor(pts.length / 5));
-    for (var xi = 0; xi < pts.length; xi += stepX) {
-      var tx = svgEl('text', { x: X(xi), y: H - 6, 'text-anchor': 'middle' });
+    // X 轴：按跨度自动选年份/月份
+    var ticksX = timeTicks(pts, 6);
+    for (var xi = 0; xi < ticksX.length; xi++) {
+      var tx = svgEl('text', { x: X(ticksX[xi].i), y: H - 6, 'text-anchor': 'middle' });
       tx.setAttribute('class', 'axis');
-      tx.textContent = String(pts[xi].x).slice(0, 7);
+      tx.textContent = ticksX[xi].label;
       svg.appendChild(tx);
     }
 
@@ -748,6 +968,74 @@
     var line = svgEl('path', { d: d, fill: 'none', stroke: opts.color || COLORS.accent, 'stroke-width': '1.7',
                                'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
     svg.appendChild(line);
+
+    // 叠加线（同一量纲，例如「期望回报路径」）：虚线，不占右轴
+    var overlays = opts.overlay || [];
+    for (var oi = 0; oi < overlays.length; oi++) {
+      var ov = overlays[oi];
+      if (!ov.points || ov.points.length < 2) continue;
+      var od = '';
+      for (var oj = 0; oj < ov.points.length; oj++) {
+        var oy = Y(ov.points[oj].y);
+        od += (oj === 0 ? 'M' : ' L') + X(oj).toFixed(2) + ' ' + oy.toFixed(2);
+      }
+      svg.appendChild(svgEl('path', { d: od, fill: 'none', stroke: ov.color || '#f0b429',
+                                      'stroke-width': '1.3', 'stroke-dasharray': '5 4', opacity: '0.9' }));
+      // 标签放起点上方：末点那边有白点和极值标注，容易压字
+      var firstO = ov.points[0];
+      var ol = svgEl('text', { x: pad.l + 4, y: Y(firstO.y) - 6, 'text-anchor': 'start',
+                               fill: ov.color || '#f0b429', 'font-size': '9.5' });
+      ol.textContent = ov.label || '';
+      svg.appendChild(ol);
+    }
+
+    // 副轴：独立刻度的第二条线（例如滚动波动率）
+    if (opts.secondary && opts.secondary.points && opts.secondary.points.length >= 2) {
+      var sec = opts.secondary.points;
+      var sLo = Math.min.apply(null, sec.map(function (p) { return p.y; }));
+      var sHi = Math.max.apply(null, sec.map(function (p) { return p.y; }));
+      if (sHi === sLo) sHi = sLo + 1;
+      var pad2 = (sHi - sLo) * 0.1;
+      sLo -= pad2; sHi += pad2;
+      function Y2(v) { return pad.t + ih - ih * (v - sLo) / (sHi - sLo); }
+      var sd = '';
+      for (var si = 0; si < sec.length; si++) {
+        sd += (si === 0 ? 'M' : ' L') + X(si).toFixed(2) + ' ' + Y2(sec[si].y).toFixed(2);
+      }
+      svg.appendChild(svgEl('path', { d: sd, fill: 'none', stroke: opts.secondary.color || '#8a8a99',
+                                      'stroke-width': '1.2', opacity: '0.85' }));
+      var sTicks = niceTicks(sLo, sHi, 3);
+      for (var sti = 0; sti < sTicks.length; sti++) {
+        var sl = svgEl('text', { x: W - 4, y: Y2(sTicks[sti]) + 3.5, 'text-anchor': 'end',
+                                 fill: opts.secondary.color || '#8a8a99', 'font-size': '9' });
+        sl.textContent = sTicks[sti].toFixed(1) + (opts.secondary.unit || '');
+        svg.appendChild(sl);
+      }
+      var sn = svgEl('text', { x: W - 4, y: pad.t + 9, 'text-anchor': 'end',
+                               fill: opts.secondary.color || '#8a8a99', 'font-size': '9' });
+      sn.textContent = opts.secondary.label || '';
+      svg.appendChild(sn);
+    }
+
+    // 极值与末值标记：一眼看出区间高低点和现在在哪
+    var hiIdx = 0, loIdx = 0;
+    for (var mi = 1; mi < pts.length; mi++) {
+      if (pts[mi].y > pts[hiIdx].y) hiIdx = mi;
+      if (pts[mi].y < pts[loIdx].y) loIdx = mi;
+    }
+    function marker(i, color, label, dy) {
+      svg.appendChild(svgEl('circle', { cx: X(i), cy: Y(pts[i].y), r: '2.6', fill: color }));
+      if (!label) return;
+      var t = svgEl('text', { x: X(i), y: Y(pts[i].y) + (dy || -7), 'text-anchor': 'middle',
+                              fill: color, 'font-size': '9' });
+      t.textContent = label;
+      svg.appendChild(t);
+    }
+    marker(hiIdx, '#29c08a', opts.markMax === false ? '' : fmtAxis(pts[hiIdx].y, opts.unit), -7);
+    if (loIdx !== hiIdx) marker(loIdx, '#e5533d', opts.markMin === false ? '' : fmtAxis(pts[loIdx].y, opts.unit), 12);
+    var lastIdx = pts.length - 1;
+    svg.appendChild(svgEl('circle', { cx: X(lastIdx), cy: Y(pts[lastIdx].y), r: '3.2',
+                                      fill: '#ffffff', stroke: opts.color || COLORS.accent, 'stroke-width': '1.6' }));
 
     // 动效：描边从无到有（拿不到 getTotalLength 时静默跳过）
     if (typeof line.getTotalLength === 'function') {
@@ -959,6 +1247,30 @@
       r2.textContent = '累计';
       svg.appendChild(r2);
     }
+    // 副轴：滚动波动率（独立刻度，画在右轴）
+    if (opts.secondary && opts.secondary.points && opts.secondary.points.length >= 2) {
+      var sec = opts.secondary.points;
+      var sLo = Math.min.apply(null, sec.map(function (p) { return p.y; }));
+      var sHi = Math.max.apply(null, sec.map(function (p) { return p.y; }));
+      if (sHi === sLo) sHi = sLo + 1;
+      function YS(v) { return pad.t + ih - ih * (v - sLo) / (sHi - sLo); }
+      var sdp = '';
+      for (var si = 0; si < sec.length; si++) {
+        var sx = pad.l + iw * (si + 0.5) / sec.length;
+        sdp += (si === 0 ? 'M' : ' L') + sx.toFixed(2) + ' ' + YS(sec[si].y).toFixed(2);
+      }
+      svg.appendChild(svgEl('path', { d: sdp, fill: 'none', stroke: opts.secondary.color || '#9b6dff',
+                                      'stroke-width': '1.2', opacity: '0.9' }));
+      // 标签放左上：右上角同时有「累计」终值，会互相压住
+      var chip = svgEl('rect', { x: pad.l + 2, y: pad.t + 1, width: 128, height: 13, rx: '3',
+                                 fill: 'rgba(15,17,21,.78)' });
+      svg.appendChild(chip);
+      var smax = svgEl('text', { x: pad.l + 6, y: pad.t + 11, 'text-anchor': 'start',
+                                 fill: opts.secondary.color || '#9b6dff', 'font-size': '9' });
+      smax.textContent = (opts.secondary.label || '') + ' 峰值 ' + sHi.toFixed(1) + (opts.secondary.unit || '');
+      svg.appendChild(smax);
+    }
+
     var stepX = Math.max(1, Math.floor(items.length / 5));
     for (var xi = 0; xi < items.length; xi += stepX) {
       var tx = svgEl('text', { x: pad.l + iw * (xi + 0.5) / items.length, y: H - 6, 'text-anchor': 'middle' });
@@ -1148,13 +1460,69 @@
       .catch(function () { /* ignore */ });
   });
 
+  /* ---------- 参数与时间范围绑定 ---------- */
+
+  function rerenderCharts() {
+    if (LAST_CURVE && LAST_CURVE.length) drawCurve(LAST_CURVE);
+    renderExpectation(LAST_RUN);
+  }
+
+  function bindParams() {
+    var c = document.getElementById('p-capital');
+    var t = document.getElementById('p-target');
+    var m = document.getElementById('p-maxdd');
+    var reset = document.getElementById('p-reset');
+
+    function readInputs() {
+      var cv = c ? parseFloat(c.value) : NaN;
+      var tv = t ? parseFloat(t.value) : NaN;
+      var mv = m ? parseFloat(m.value) : NaN;
+      if (isFinite(cv) && cv > 0) PARAMS.capital = cv;
+      if (isFinite(tv) && tv >= 0 && tv <= 100) PARAMS.target = tv;
+      if (isFinite(mv) && mv > 0 && mv <= 90) PARAMS.maxdd = mv;
+      persistParams();
+      rerenderCharts();
+    }
+
+    [c, t, m].forEach(function (el2) {
+      if (el2) { el2.addEventListener('change', readInputs); el2.addEventListener('input', readInputs); }
+    });
+    if (reset) {
+      reset.addEventListener('click', function () {
+        PARAMS = { capital: 1000000, target: 10, maxdd: 20 };
+        syncParamInputs();
+        persistParams();
+        rerenderCharts();
+      });
+    }
+
+    var btns = document.querySelectorAll('[data-range]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function (ev) {
+        var btn = ev.currentTarget || ev.target;
+        RANGE = btn.getAttribute('data-range') || 'all';
+        for (var k = 0; k < btns.length; k++) {
+          btns[k].className = btns[k] === btn ? 'tabbtn on' : 'tabbtn';
+        }
+        rerenderCharts();
+      });
+    }
+  }
+
+  loadParams();
+  syncParamInputs();
+  bindParams();
+
   // 供自动化测试 / 浏览器调试用：不参与渲染逻辑，只是把纯函数拿出来
   window.__dshQuantCtaCharts = {
     drawLine: drawLine, drawDonut: drawDonut, drawBars: drawBars, drawSectorBars: drawSectorBars,
     niceTicks: niceTicks, colorMap: colorMap, sectorColor: sectorColor, constraintsText: constraintsText,
-    fmtAxis: fmtAxis,
+    fmtAxis: fmtAxis, lttb: lttb, timeTicks: timeTicks, rollingVol: rollingVol,
     __setCurve: function (c) { LAST_CURVE = c; renderIntraday(); },
     __setIntradayMode: function (m) { INTRADAY_MODE = m; },
+    __setParams: function (p) { PARAMS = p; syncParamInputs(); },
+    __getParams: function () { return PARAMS; },
+    __setRange: function (r) { RANGE = r; },
   };
 
   load();

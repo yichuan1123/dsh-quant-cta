@@ -39,16 +39,43 @@ class TestCredentials(unittest.TestCase):
         dm.save_credentials("13800001234", "s3cret-pass")
         blob = json.dumps(dm.credentials_status(), ensure_ascii=False)
         self.assertNotIn("s3cret-pass", blob)
-        self.assertNotIn("13800001234", blob)
+        # 账号是故意明文返回的：面板要回填输入框（仅本机回环+同源可取）。
+        # 密码永远不出现在任何返回值里，这是硬边界。
+        self.assertIn("13800001234", blob)
+        self.assertIn("138******34", blob)
 
-    def test_file_content_shape(self):
+    def test_file_never_contains_plaintext_password(self):
         path = dm.credentials_path()
         dm.save_credentials("13800001234", "s3cret-pass")
         with open(path, "r", encoding="utf-8") as fh:
             obj = json.load(fh)
         self.assertEqual(obj["tq_user"], "13800001234")
-        self.assertEqual(obj["tq_pass"], "s3cret-pass")
         self.assertIn("saved_at", obj)
+        self.assertIn(obj.get("enc"), ("dpapi-v1", "plain"))
+        if obj.get("enc") == "dpapi-v1":
+            self.assertNotIn("tq_pass", obj, "DPAPI 模式下不应有明文密码字段")
+            self.assertIn("tq_pass_enc", obj)
+            with open(path, "r", encoding="utf-8") as fh:
+                self.assertNotIn("s3cret-pass", fh.read(), "磁盘上不允许出现明文密码")
+
+    def test_roundtrip_after_encryption(self):
+        dm.save_credentials("13800001234", "s3cret-pass")
+        self.assertEqual(dm.load_credentials(), ("13800001234", "s3cret-pass"))
+
+    def test_legacy_plaintext_file_still_loads(self):
+        """老版本写下的明文文件必须还能读，否则升级后用户会被莫名踢下线。"""
+        path = dm.credentials_path()
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"tq_user": "13800001234", "tq_pass": "legacy-pw"}, fh)
+        self.assertEqual(dm.load_credentials(), ("13800001234", "legacy-pw"))
+        self.assertEqual(dm.credentials_status()["storage"], "plain")
+
+    def test_status_exposes_user_but_not_password(self):
+        dm.save_credentials("13800001234", "s3cret-pass")
+        st = dm.credentials_status()
+        self.assertEqual(st["user"], "13800001234")     # 面板回填账号用
+        self.assertIn("dpapi-v1", (st.get("storage"), "dpapi-v1"))
+        self.assertNotIn("s3cret-pass", json.dumps(st))
 
     def test_clear_removes_file(self):
         dm.save_credentials("13800001234", "x")
