@@ -2,6 +2,14 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.1] - 2026-11-09
+
+### 修复
+
+- 客户端 tab 的 iframe 原本带 `sandbox`，缺 `allow-modals`，会把面板里「清除凭据」的
+  `confirm()` 静默拦掉——表现是按钮点了没反应。现在不带 sandbox（同源自有页面，无隔离需求），
+  并在 `tools/smoke-client.mjs` 里加了断言守住这条
+
 ## [0.3.0] - 2026-11-09
 
 ### 新增

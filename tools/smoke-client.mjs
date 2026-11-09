@@ -82,6 +82,8 @@ const node = slot.comp({})
 assert(node.type === 'iframe', '组件渲染 iframe')
 assert(node.props.src === '/dsh-quant-cta/panel', 'iframe 指向面板路由')
 assert(String(node.props.title).length > 0, 'iframe 有 title（无障碍）')
+// 回归：iframe 不能带 sandbox —— 少了 allow-modals 会把面板里的 confirm() 拦掉
+assert(node.props.sandbox === undefined, 'iframe 不带 sandbox（否则 confirm 会被拦）')
 
 /* ── 4. 暴露的调试入口能打开 tab ── */
 assert(sandbox.window.__dshQuantCta !== undefined, '挂上了 window.__dshQuantCta')

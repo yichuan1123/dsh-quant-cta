@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     var React = require('react');
     var h = React.createElement;
 
-    var PLUGIN_VERSION = '0.3.0';
+    var PLUGIN_VERSION = '0.3.1';
     var TAB_ID = 'dsh-quant-cta';
     var TAB_KIND = 'quantcta';
     var PANEL_URL = '/dsh-quant-cta/panel';
@@ -31,12 +31,15 @@ window.__ModuleLoader__.load({
         style: {
           width: '100%',
           height: '100%',
+          minHeight: '520px',
           border: '0',
           display: 'block',
           background: '#0f1115',
         },
-        // 面板是纯静态页 + fetch，不需要任何权限
-        sandbox: 'allow-scripts allow-same-origin allow-forms',
+        // 刻意不加 sandbox：
+        // ① 面板是同源、自己写的静态页，没有隔离需求；
+        // ② sandbox 缺 allow-modals 会把面板里「清除凭据」的 confirm() 静默拦掉，
+        //    表现为按钮点了没反应——这类坑比它挡住的威胁更实际。
       });
     }
 
