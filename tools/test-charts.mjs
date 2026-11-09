@@ -318,6 +318,17 @@ const noModelKids = registry.model.children.map((c) => String(c.textContent)).jo
 assert(noModelKids.indexOf('vol_parity') >= 0,
   '没启用 optimizer 的回测：模型区给出说明而不是留着上一份的图（实际：“' + noModelKids.slice(0, 40) + '”）')
 
+const heatRest = node('div')
+const manyW = {}
+for (let i = 0; i < 12; i++) manyW['s' + i] = 0.04
+C.drawWeightHeat(heatRest, { series: [{ asof: '2024-01-02', weights: manyW }, { asof: '2024-02-02', weights: manyW }], rowCap: 4 })
+const restCells = all(heatRest.children[0], 'rect').filter((c) => c.attrs['data-code'] === '__rest__')
+assert(restCells.length === 2, '「其他」行也画了格子（' + restCells.length + '）')
+assert(restCells.every((c) => /hsl\(220, 8%/.test(String(c.attrs.fill))),
+  '「其他」行用中性灰，不和单个品种的蓝色阶混在一起')
+assert(all(heatRest.children[0], 'text').some((t2) => String(t2.textContent).indexOf('（合计）') >= 0),
+  '「其他」行标了（合计）')
+
 const heatEmpty = node('div')
 C.drawWeightHeat(heatEmpty, { series: [] })
 assert(heatEmpty.children.length >= 1 && String(heatEmpty.children[0].textContent).indexOf('权重') >= 0,

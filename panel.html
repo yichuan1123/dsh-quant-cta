@@ -1586,11 +1586,16 @@
       for (var c = 0; c < pos.length; c++) {
         var w = rowValue(code, series[pos[c]]);
         var k = Math.max(0, Math.min(1, w / maxW));
+        // 「其他 N（合计）」是多个品种的和，用同一套蓝色阶会被误读成「一个很重的品种」→ 改用中性灰
+        var isRest = code === "__rest__";
+        var fill;
+        if (w <= 0) fill = "rgba(255,255,255,.03)";
+        else if (isRest) fill = "hsl(220, 8%, " + (20 + 34 * Math.pow(k, 0.75)).toFixed(1) + "%)";
+        else fill = "hsl(214, 88%, " + (16 + 68 * Math.pow(k, 0.75)).toFixed(1) + "%)";
         var cell = svgEl("rect", {
           x: (pad.l + c * cellW).toFixed(2), y: (pad.t + r * rowH).toFixed(2),
           width: Math.max(1, cellW - 0.6).toFixed(2), height: (rowH - 1.5).toFixed(2),
-          fill: w > 0 ? "hsl(214, 88%, " + (16 + 68 * Math.pow(k, 0.75)).toFixed(1) + "%)"
-                      : "rgba(255,255,255,.03)",
+          fill: fill,
           rx: "1.5",
         });
         cell.setAttribute("data-code", code);
@@ -1599,7 +1604,7 @@
       }
       var lab = svgEl("text", { x: pad.l - 6, y: pad.t + r * rowH + rowH / 2 + 3.5, "text-anchor": "end" });
       lab.setAttribute("class", "axis");
-      lab.textContent = code === "__rest__" ? ("其他 " + rest.length) : code;
+      lab.textContent = code === "__rest__" ? ("其他 " + rest.length + "（合计）") : code;
       svg.appendChild(lab);
     }
 
