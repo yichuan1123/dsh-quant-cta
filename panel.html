@@ -1345,8 +1345,11 @@
     var W = hostWidth(host, 660), H = opts.height || 220;
     var pad = { l: 70, r: 18, t: 18, b: 26 };
     var capital = opts.capital || 1000000;
-    var mu = opts.annual || 0.1;
-    var sigma = Math.max(0.0001, opts.vol || 0.1);
+    // 注意：0% 是合法输入（想看不涨不跌会是什么样），不能用 `||` 兜默认值，
+    // 否则 0 会被当成「没传」换成 10%——终值直接多出 33 万
+    var mu = (typeof opts.annual === 'number' && isFinite(opts.annual)) ? opts.annual : 0.1;
+    var sigma = (typeof opts.vol === 'number' && isFinite(opts.vol))
+      ? Math.max(0.0001, opts.vol) : 0.1;
     var years = opts.years || 3;
     var start = opts.start ? new Date(opts.start) : new Date();
     if (isNaN(start.getTime())) start = new Date();

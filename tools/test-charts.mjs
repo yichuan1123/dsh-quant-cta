@@ -352,6 +352,18 @@ const endLabel = projTexts.find((t) => t.indexOf('期望') === 0)
 const endNum = Number(String(endLabel).replace(/[^0-9.]/g, ''))
 assert(Math.abs(endNum - 1000000 * Math.pow(1.1, 3)) < 2, '三年终值 = 本金×(1+10%)^3（实际 ' + endNum + '）')
 
+// 0% 期望是合法输入，不能被 `|| 默认值` 吃掉变成 10%
+const zeroHost = node('div')
+C.drawProjection(zeroHost, { capital: 1000000, annual: 0, vol: 0.1, years: 3, start: '2026-11-09' })
+const zeroEnd = all(zeroHost.children[0], 'text').map((t) => String(t.textContent)).find((t) => t.indexOf('期望') === 0)
+assert(zeroEnd.includes('1,000,000'), '期望年化 0% 时终值应等于本金（实际 ' + zeroEnd + '）')
+
+// 负期望：终值必须低于本金
+const negHost = node('div')
+C.drawProjection(negHost, { capital: 1000000, annual: -0.05, vol: 0.2, years: 2, start: '2026-11-09' })
+const negEnd = all(negHost.children[0], 'text').map((t) => String(t.textContent)).find((t) => t.indexOf('期望') === 0)
+assert(negEnd.includes('902,500'), '期望 −5% 两年终值 = 90.25 万（实际 ' + negEnd + '）')
+
 // 历史净值图不应再出现「期望路径」这条从 2016 年起的线
 const curveHost = node('div')
 C.drawLine(curveHost, { points: [{ x: '2016-01-05', y: 100 }, { x: '2016-02-05', y: 101 }] })
