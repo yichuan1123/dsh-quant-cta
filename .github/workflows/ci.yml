@@ -38,3 +38,6 @@ jobs:
 
       - name: 客户端半身冒烟（vm 沙箱）
         run: node tools/smoke-client.mjs
+
+      - name: 面板图表测试（假 DOM 跑真代码）
+        run: node tools/test-charts.mjs
