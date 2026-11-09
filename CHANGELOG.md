@@ -2,6 +2,22 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.7] - 2026-11-09
+
+### 修复
+
+- **回测列表排序错**：`list_runs` 按目录名字符串排序，`real_v066` 会排在 `v040_check`
+  后面，于是面板/CLI 的「最近一次」一直是旧记录——真实数据跑完看起来像没生效。
+  现在 CLI 与宿主都按 `generated_at` 倒序（同时间再按 run_id）
+- **冒烟测试污染真实记录**：冒烟会往 `runs/` 里写 `smoke_test`。新增
+  `QCTA_RUNS_DIR` 环境变量覆盖产出目录，冒烟改写到 `.preview/runs`
+
+### 变更
+
+- 历史测试残留（smoke_test / host_verify / ci_run / r2_* / v040_check 等 22 个）已移到
+  `.preview/old-runs/`（可恢复，未删除），`runs/` 只留：合成基线 `full_opt` 与真实回测
+  `real_full` / `real_v066`
+
 ## [0.6.6] - 2026-11-09
 
 ### 修复

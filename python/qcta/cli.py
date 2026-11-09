@@ -27,8 +27,10 @@ STATE_DIR = os.path.join(REPO_ROOT, "state")
 
 
 def runs_dir():
-    os.makedirs(RUNS_DIR, exist_ok=True)
-    return RUNS_DIR
+    """回测产出目录。QCTA_RUNS_DIR 可覆盖（冒烟测试用它隔离，别污染真实记录）。"""
+    d = os.path.abspath(os.environ.get("QCTA_RUNS_DIR") or RUNS_DIR)
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 def state_dir():
@@ -403,9 +405,14 @@ def cmd_backtest(args):
 # ───────────────────────────── runs / report ─────────────────────────────
 
 def list_runs():
+    """列出历史回测，**按生成时间倒序**。
+
+    早期按目录名字符串排序，结果 real_v066 排在 v040_check 后面，
+    面板/CLI 的「最近一次」永远是旧记录——真实数据跑完看起来像没生效。
+    """
     base = runs_dir()
     out = []
-    for name in sorted(os.listdir(base), reverse=True):
+    for name in sorted(os.listdir(base)):
         rj = os.path.join(base, name, "report.json")
         if not os.path.exists(rj):
             continue
@@ -423,6 +430,8 @@ def list_runs():
             "cagr_pct": m.get("cagr_pct"), "sharpe": m.get("sharpe"),
             "max_drawdown_pct": m.get("max_drawdown_pct"), "trades": m.get("trades"),
         })
+    # 按生成时间倒序（同时间再按 run_id），保证「最新一条」就是真的最新
+    out.sort(key=lambda r: (r.get("generated_at") or "", r.get("run_id") or ""), reverse=True)
     return out
 
 

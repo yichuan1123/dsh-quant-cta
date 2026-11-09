@@ -22,6 +22,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const CRED_DIR = join(ROOT, '.preview')
 mkdirSync(CRED_DIR, { recursive: true })
 const CRED_PATH = join(CRED_DIR, 'smoke-credentials.json')
+// 回测产出也隔离到 .preview/runs：冒烟不该往用户真实记录里塞 smoke_test
+process.env.QCTA_RUNS_DIR = join(CRED_DIR, 'runs')
 process.env.QCTA_CRED_PATH = CRED_PATH
 if (existsSync(CRED_PATH)) rmSync(CRED_PATH)
 
