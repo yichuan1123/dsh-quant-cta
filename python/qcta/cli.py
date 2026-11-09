@@ -12,8 +12,9 @@ import sys
 
 from . import __version__
 from .data import (TqSdkError, cache_dir, clear_credentials, credentials_path,
-                   credentials_status, fetch_tqsdk, load_bundle, load_cache,
-                   load_credentials, probe_credentials, save_credentials, save_cache)
+                   credentials_status, fetch_tqsdk, fetch_tqsdk_many, load_bundle,
+                   load_cache, load_credentials, probe_credentials, save_credentials,
+                   save_cache)
 from .engine import Backtester
 from .metrics import compute_metrics
 from .report import render_markdown, write_reports
@@ -229,23 +230,34 @@ def cmd_data(args):
 
     codes = resolve_pool(args.pool)
     results = []
-    for code in codes:
-        spec = get_spec(code)
-        entry = {"code": code, "source": None, "bars": 0}
+    if args.live:
+        # 一次登录拉全部品种（逐品种登录在 28 个品种上要跑十几分钟）
+        if not args.json:
+            sys.stderr.write("正在从天勤拉取 %d 个品种（一次登录批量订阅）…\n" % len(codes))
+            sys.stderr.flush()
         try:
-            if args.live:
-                bars, adj = fetch_tqsdk(code, spec=spec)
-                save_cache(code, bars)
-                entry.update(source="tqsdk", bars=len(bars), adj=adj)
-            else:
-                bars = load_cache(code)
-                if not bars:
-                    entry.update(source="cache-miss", bars=0)
-                else:
-                    entry.update(source="cache", bars=len(bars))
+            fetched = fetch_tqsdk_many(codes)
         except TqSdkError as exc:
-            entry.update(source="tqsdk-failed", error=str(exc))
-        results.append(entry)
+            return _emit({"ok": False, "error": str(exc)}, args.json, lambda p: p["error"])
+        for code in codes:
+            entry = {"code": code, "source": None, "bars": 0}
+            res = fetched.get(code) or {"error": "未返回该品种"}
+            if "error" in res:
+                entry.update(source="tqsdk-failed", error=res["error"])
+            else:
+                save_cache(code, res["bars"], source="tqsdk", adj=res.get("adj"))
+                entry.update(source="tqsdk", bars=len(res["bars"]), adj=res.get("adj"))
+            results.append(entry)
+            if not args.json:
+                sys.stderr.write("  %-4s %-12s %s\n" % (
+                    code, entry.get("source"), entry.get("error") or ("%d 根" % entry.get("bars", 0))))
+                sys.stderr.flush()
+    else:
+        for code in codes:
+            entry = {"code": code, "source": None, "bars": 0}
+            bars = load_cache(code)
+            entry.update(source="cache" if bars else "cache-miss", bars=len(bars))
+            results.append(entry)
     return _emit({"cache_dir": cache_dir(), "synced": results}, args.json,
                  lambda p: "\n".join("%-4s %-12s %s" % (r["code"], r.get("source"), r.get("error", ""))
                                       for r in p["synced"]))

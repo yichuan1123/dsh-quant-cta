@@ -173,7 +173,7 @@ python -m qcta paper step --live
 ## 开发
 
 ```bash
-python -m unittest discover -s python/tests -t python   # 82 个单测
+python -m unittest discover -s python/tests -t python   # 88 个单测
 node --check lib/index.js                              # 插件语法
 node tools/smoke.mjs                                   # 插件冒烟（假 ctx + 真引擎）
 cd python && python -m qcta backtest --pool starter --start 2021-01-01 --name ci_run

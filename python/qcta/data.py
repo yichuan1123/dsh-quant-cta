@@ -16,6 +16,7 @@ import json
 import math
 import os
 import random
+import time as _time
 
 from .secrets import SCHEME_DPAPI, SCHEME_PLAIN, protect, unprotect
 from .specs import ContractSpec, get_spec
@@ -35,9 +36,25 @@ def cache_path(code: str) -> str:
     return os.path.join(cache_dir(), code + ".csv")
 
 
+def cache_meta_path(code: str) -> str:
+    return os.path.join(cache_dir(), code + ".meta.json")
+
+
+def cache_meta(code: str):
+    """读缓存来源元信息（source/adj/synced_at）；没有就返回 None。"""
+    p = cache_meta_path(code)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
 # ───────────────────────────── 缓存读写 ─────────────────────────────
 
-def save_cache(code: str, bars) -> str:
+def save_cache(code: str, bars, source: str = "unknown", adj=None) -> str:
     path = cache_path(code)
     tmp = path + ".tmp"
     with open(tmp, "w", newline="", encoding="utf-8") as fh:
@@ -46,6 +63,24 @@ def save_cache(code: str, bars) -> str:
         for b in bars:
             w.writerow([b.date, _fmt(b.open), _fmt(b.high), _fmt(b.low), _fmt(b.close), b.volume, b.open_interest])
     os.replace(tmp, path)
+    # 记下来源：面板/报告据此区分「天勤真实数据」与「本地缓存」，
+    # 而不是永远显示 cache 让人以为没接真实行情。
+    try:
+        meta = {
+            "code": code,
+            "source": source,
+            "adj": adj,
+            "bars": len(bars),
+            "first": bars[0].date if bars else "",
+            "last": bars[-1].date if bars else "",
+            "synced_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        }
+        mp = cache_meta_path(code)
+        with open(mp + ".tmp", "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, ensure_ascii=False, indent=2)
+        os.replace(mp + ".tmp", mp)
+    except OSError:
+        pass
     return path
 
 
@@ -379,73 +414,116 @@ class TqSdkError(RuntimeError):
     pass
 
 
-def fetch_tqsdk(code: str, data_length: int = 3000, spec: ContractSpec = None):
-    """从天勤拉主连日线。需要快期账号（免费注册）。
+def _serial_to_bars(serial):
+    """把天勤的 K 线 DataFrame 转成 Bar 列表（跳过 NaN / 无效行）。"""
+    rows = []
+    for _, r in serial.iterrows():
+        ns = r.get("datetime")
+        if ns is None or (isinstance(ns, float) and math.isnan(ns)):
+            continue
+        ts = _dt.datetime.fromtimestamp(int(ns) / 1e9, tz=_dt.timezone(_dt.timedelta(hours=8)))
+        o = float(r["open"]); h = float(r["high"]); l = float(r["low"]); c = float(r["close"])
+        if any(math.isnan(x) for x in (o, h, l, c)) or o <= 0:
+            continue
+        rows.append(
+            Bar(
+                date=ts.date().isoformat(),
+                open=o,
+                high=h,
+                low=l,
+                close=c,
+                volume=float(r.get("volume", 0) or 0),
+                open_interest=float(r.get("open_oi", r.get("close_oi", 0)) or 0),
+            )
+        )
+    rows.sort(key=lambda b: b.date)
+    return rows
 
-    返回 (bars, adj_type_used)。adj_type 为 None 表示该版本不支持复权参数，
-    此时主连拼接会有换月跳空 —— 报告里会提示。
-    """
-    spec = spec or get_spec(code)
+
+def _require_credentials():
     cred = load_credentials()
     if not cred:
         raise TqSdkError(
             "缺少快期账号凭据。请设置环境变量 QCTA_TQ_USER / QCTA_TQ_PASS，"
             "或在 " + credentials_path() + " 写入 {\"tq_user\":\"..\",\"tq_pass\":\"..\"}。"
         )
+    return cred
+
+
+def _adj_candidates():
+    # 复权口径因 tqsdk 版本而异：
+    #   3.x 只认 None / 'F'(前复权) / 'B'(后复权)；老教程里的 'BFD' 会被拒。
+    # 主连（KQ.m@）本身已处理换月，前复权能让最新价等于当前真实价，
+    # 保证金/手数换算才准，所以优先 'F'。
+    return ("F", "B", None)
+
+
+def fetch_tqsdk_many(codes, data_length: int = 3000):
+    """**一次登录**拉多个品种的主连日线。
+
+    为什么不是每个品种各开一个 TqApi：登录+订阅是重操作，逐品种登录在 28 个品种上
+    要跑十几分钟；一次会话批量订阅只需几秒。
+
+    返回 {code: {"bars": [...], "adj": "F"}}，失败品种带 "error"。
+    """
+    cred = _require_credentials()
     try:
         from tqsdk import TqApi, TqAuth  # type: ignore
     except Exception as exc:  # pragma: no cover - 环境相关
         raise TqSdkError("未安装 tqsdk（pip install tqsdk）：%s" % exc)
 
     api = TqApi(auth=TqAuth(cred[0], cred[1]))
+    out = {}
     try:
-        sym = spec.tq_symbol()
-        serial = None
-        adj_used = None
-        for adj in ("BFD", None):
+        serials = {}
+        adjs = {}
+        for code in codes:
+            spec = get_spec(code)
+            sym = spec.tq_symbol()
+            last_err = None
+            for adj in _adj_candidates():
+                try:
+                    serials[code] = api.get_kline_serial(sym, 86400, data_length=data_length, adj_type=adj)
+                    adjs[code] = adj
+                    break
+                except Exception as exc:  # 不同版本抛的异常类型不一致，统一兜住
+                    last_err = exc
+                    continue
+            if code not in serials:
+                out[code] = {"error": "拉取失败：%s" % last_err}
+
+        # 重要：get_kline_serial 返回时历史通常**已经带回**（实测 data_length 根），
+        # 而 wait_update() 等的是「下一次变化」——行情静默时它会无限期干等，
+        # 这就是之前「批量拉取卡住」的原因。所以这里只做有界的补充等待。
+        budget = _time.time() + 15.0
+        while serials and _time.time() < budget:
+            if all(len(s) > 0 for s in serials.values()):
+                break
             try:
-                serial = api.get_kline_serial(sym, 86400, data_length=data_length, adj_type=adj)
-                adj_used = adj
+                api.wait_update(deadline=min(budget, _time.time() + 1.0))
+            except TypeError:      # 老版本不支持 deadline
                 break
-            except TypeError:
-                continue
-        if serial is None:
-            serial = api.get_kline_serial(sym, 86400, data_length=data_length)
-        # 首次 wait_update 把历史 K 线填满；给足若干次机会。
-        for _ in range(20):
-            api.wait_update()
-            if len(serial) > 0:
-                break
-        rows = []
-        cols = list(serial.columns)
-        for _, r in serial.iterrows():
-            ns = r.get("datetime")
-            if ns is None or (isinstance(ns, float) and math.isnan(ns)):
-                continue
-            ts = _dt.datetime.fromtimestamp(int(ns) / 1e9, tz=_dt.timezone(_dt.timedelta(hours=8)))
-            o = float(r["open"]); h = float(r["high"]); l = float(r["low"]); c = float(r["close"])
-            if any(math.isnan(x) for x in (o, h, l, c)) or o <= 0:
-                continue
-            rows.append(
-                Bar(
-                    date=ts.date().isoformat(),
-                    open=o,
-                    high=h,
-                    low=l,
-                    close=c,
-                    volume=float(r.get("volume", 0) or 0),
-                    open_interest=float(r.get("open_oi", r.get("close_oi", 0)) or 0),
-                )
-            )
-        rows.sort(key=lambda b: b.date)
-        if not rows:
-            raise TqSdkError("天勤返回空数据（品种 %s）。请确认账号有该品种行情权限。" % code)
-        return rows, adj_used
+
+        for code, serial in serials.items():
+            bars = _serial_to_bars(serial)
+            if not bars:
+                out[code] = {"error": "天勤返回空数据（品种 %s）" % code}
+            else:
+                out[code] = {"bars": bars, "adj": adjs.get(code)}
     finally:
         try:
             api.close()
         except Exception:
             pass
+    return out
+
+
+def fetch_tqsdk(code: str, data_length: int = 3000, spec: ContractSpec = None):
+    """单个品种（内部走批量接口，只开一次会话）。返回 (bars, adj)。"""
+    res = fetch_tqsdk_many([code], data_length=data_length).get(code) or {}
+    if "error" in res:
+        raise TqSdkError(res["error"])
+    return res["bars"], res.get("adj")
 
 
 # ───────────────────────────── 统一入口 ─────────────────────────────
@@ -486,8 +564,16 @@ def load_bundle(codes, start: str, end: str, prefer_live: bool = False, refresh:
         spec = get_spec(code)
         cached = load_cache(code)
         if cached and not refresh:
+            meta = cache_meta(code) or {}
+            # 缓存若是从天勤同步来的，来源就按 tqsdk 记——否则报告永远写 cache，
+            # 看不出到底用的是不是真实行情。
+            src = "tqsdk" if meta.get("source") == "tqsdk" else "cache"
+            sources.add(src)
+            if meta.get("synced_at"):
+                notes.append("%s: %s 数据（%s 同步，%s 根，adj=%s）" % (
+                    code, "天勤" if src == "tqsdk" else "本地缓存", meta["synced_at"],
+                    meta.get("bars", len(cached)), meta.get("adj")))
             bars_by_code[code] = slice_bars(cached, start, end)
-            sources.add("cache")
             continue
 
         bars = []

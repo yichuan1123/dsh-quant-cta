@@ -51,6 +51,27 @@ class TestSyntheticData(unittest.TestCase):
                 else:
                     os.environ["QCTA_DATA_DIR"] = old
 
+    def test_cache_meta_records_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.environ.get("QCTA_DATA_DIR")
+            os.environ["QCTA_DATA_DIR"] = tmp
+            try:
+                bars = synthetic_bars("rb", "2020-01-01", "2020-03-31", get_spec("rb"))
+                save_cache("rb", bars, source="tqsdk", adj="F")
+                meta = data_mod.cache_meta("rb")
+                self.assertIsNotNone(meta)
+                self.assertEqual(meta["source"], "tqsdk")
+                self.assertEqual(meta["adj"], "F")
+                self.assertEqual(meta["bars"], len(bars))
+                # 来源是天勤时，bundle 应报 tqsdk 而不是 cache
+                b = load_bundle(["rb"], "2020-01-01", "2020-03-31")
+                self.assertEqual(b.source, "tqsdk")
+            finally:
+                if old is None:
+                    os.environ.pop("QCTA_DATA_DIR", None)
+                else:
+                    os.environ["QCTA_DATA_DIR"] = old
+
     def test_refresh_keeps_cache_instead_of_synthetic(self):
         """--refresh 但没开 live 时，必须继续用缓存，不能静默换成合成数据。"""
         with tempfile.TemporaryDirectory() as tmp:
