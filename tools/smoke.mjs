@@ -128,6 +128,13 @@ try {
   assert(after.json.configured === true && after.json.source === 'file', '保存后状态为已配置(file)')
   assert(!after.text.includes(DUMMY_PASS), '状态查询也不回显密码')
 
+  const evil = await getJson('/dsh-quant-cta/api/credentials', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    body: JSON.stringify({ user: '99999999999', password: 'attacker' }),
+  })
+  assert(evil.json !== null && evil.json.ok === false, '跨源 Origin 的写请求被拒绝')
+
   const cleared = await getJson('/dsh-quant-cta/api/credentials', { method: 'DELETE' })
   assert(cleared.json !== null && cleared.json.configured === false, 'DELETE 后回到未配置')
 } finally {

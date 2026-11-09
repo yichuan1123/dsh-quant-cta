@@ -208,7 +208,12 @@ def probe_credentials(user: str = None, password: str = None, timeout_s: int = 2
         deadline = _time.time() + timeout_s
         last = None
         while _time.time() < deadline:
-            api.wait_update()
+            # 每次只等 1 秒：wait_update 不带 deadline 时可能长时间阻塞，
+            # 而外层是 UI 请求，必须能被超时兜住。
+            try:
+                api.wait_update(deadline=min(deadline, _time.time() + 1.0))
+            except TypeError:
+                api.wait_update()
             try:
                 v = float(quote.last_price)
             except Exception:

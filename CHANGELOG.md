@@ -2,6 +2,15 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-11-09
+
+### 安全加固
+
+- 凭据端点（GET/POST/DELETE `/dsh-quant-cta/api/credentials` 与 `/test`）增加来源校验：
+  只接受本机回环 Host，带 Origin 时必须是本机同源。防 DNS rebinding 与跨站表单把账号密码写进本机文件。
+  冒烟测试补了一条「跨源写请求必须被拒」的断言
+- 连通性探测的 `wait_update` 改为带 1 秒 deadline 轮询：原先可能长时间阻塞，把 UI 请求拖死
+
 ## [0.2.0] - 2026-11-09
 
 ### 新增
