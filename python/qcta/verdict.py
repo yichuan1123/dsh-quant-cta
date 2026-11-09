@@ -25,6 +25,9 @@ def analyze(equity, dates, trades, n_trials=1, level=0.95):
         "n_returns": n,
         "n_trades": len(trades),
     }
+    if dates:
+        out["start"] = dates[0]
+        out["end"] = dates[-1]
     if n < 20:
         out["error"] = "样本不足（少于 20 个交易日），统计量没有意义"
         return out
@@ -87,10 +90,6 @@ def _days(n):
     if n > 250:
         return "%d 天（约 %.1f 年）" % (n, n / 250.0)
     return "%d 天" % n
-
-
-def _num(x, nd=2):
-    return "—" if x is None else "{0:.{1}f}".format(x, nd)
 
 
 def render_markdown(v, n_trials=1):
