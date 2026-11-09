@@ -210,6 +210,24 @@ assert(all(svg6, 'text').some((t) => String(t.textContent).indexOf('波动') >= 
 const dots = all(svg6, 'circle')
 assert(dots.length >= 3, '画了极值/末值标记（' + dots.length + ' 个点）')
 
+/* ── 11. 回归：文本不许是黑色（深色面板上等于隐形） ── */
+const blackLike = new Set(['#000', '#000000', 'black', 'rgb(0,0,0)', 'rgb(0, 0, 0)'])
+const textHosts = []
+for (const chart of [host1, host2, host3, host4, host5, host6, hostScale]) {
+  for (const svg of chart.children.filter((c) => c.tagName === 'svg')) textHosts.push(svg)
+}
+let textCount = 0
+let blackCount = 0
+for (const svg of textHosts) {
+  for (const t of all(svg, 'text')) {
+    textCount += 1
+    const fill = String(t.attrs.fill || '')
+    if (fill === '' || blackLike.has(fill.toLowerCase())) blackCount += 1
+  }
+}
+assert(textCount > 20, '统计到足够多的文本节点（' + textCount + ' 个）')
+assert(blackCount === 0, '所有 SVG 文本都有非黑填充色（黑字 ' + blackCount + ' 个）')
+
 if (failures > 0) {
   console.error('\n' + failures + ' 项失败')
   process.exit(1)
