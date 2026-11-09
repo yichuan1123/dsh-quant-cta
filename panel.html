@@ -521,40 +521,9 @@
     return t;
   }
 
-  function renderRun(d) {
-    var root = d;
-    var m = (root.metrics || {});
-    var meta = (root.meta || {});
-    document.getElementById('runid').textContent = meta.run_id || '—';
-    var srcEl = document.getElementById('src');
-    srcEl.textContent = '数据来源 ' + (meta.data_source || '—');
-    srcEl.className = 'badge ' + (meta.data_source === 'synthetic' || meta.data_source === 'mixed' ? 'warn' : 'ok');
-
-    var warn = document.getElementById('warn');
-    warn.innerHTML = '';
-    if (meta.data_source === 'synthetic' || meta.data_source === 'mixed') {
-      warn.appendChild(el('div', 'warnbox',
-        '⚠ 本次结果含合成数据（synthetic）。只能验证流程与成本模型，不能当作真实行情结论。'));
-    }
-
-    var cards = document.getElementById('cards');
-    cards.innerHTML = '';
-    cards.appendChild(card('期末权益', money(m.final_equity)));
-    cards.appendChild(card('年化收益', pct(m.cagr_pct), m.cagr_pct >= 0 ? 'up' : 'down'));
-    cards.appendChild(card('年化波动', pct(m.ann_vol_pct)));
-    cards.appendChild(card('夏普', num(m.sharpe, 2)));
-    cards.appendChild(card('最大回撤', pct(m.max_drawdown_pct), 'down'));
-    cards.appendChild(card('盈亏比 PF', num(m.profit_factor, 2)));
-    cards.appendChild(card('交易笔数', String(m.trades === undefined ? '—' : m.trades)));
-    cards.appendChild(card('成本合计', money(m.cost_total)));
-
-    LAST_RUN = root;
-    renderExpectation(root);
-    drawCurve(root.curve || []);
-
+  /** 策略腿 / 品种归因：累计净盈亏。独立成函数，窗口尺寸变化时能跟着重画。 */
+  function renderAttribution(root) {
     var runTrades = root.trades || [];
-
-    // 策略腿归因：原来是张数字表，信息量低还看不出「什么时候赚的」。改成累计净盈亏折线。
     var sHost = document.getElementById('sleeves');
     var sleeveCum = cumSeries(runTrades, 'sleeve');
     var sleeveColors = {};
@@ -595,6 +564,40 @@
       tipFormat: function (v) { return money(v); },
       empty: '还没有成交。',
     });
+  }
+
+  function renderRun(d) {
+    var root = d;
+    var m = (root.metrics || {});
+    var meta = (root.meta || {});
+    document.getElementById('runid').textContent = meta.run_id || '—';
+    var srcEl = document.getElementById('src');
+    srcEl.textContent = '数据来源 ' + (meta.data_source || '—');
+    srcEl.className = 'badge ' + (meta.data_source === 'synthetic' || meta.data_source === 'mixed' ? 'warn' : 'ok');
+
+    var warn = document.getElementById('warn');
+    warn.innerHTML = '';
+    if (meta.data_source === 'synthetic' || meta.data_source === 'mixed') {
+      warn.appendChild(el('div', 'warnbox',
+        '⚠ 本次结果含合成数据（synthetic）。只能验证流程与成本模型，不能当作真实行情结论。'));
+    }
+
+    var cards = document.getElementById('cards');
+    cards.innerHTML = '';
+    cards.appendChild(card('期末权益', money(m.final_equity)));
+    cards.appendChild(card('年化收益', pct(m.cagr_pct), m.cagr_pct >= 0 ? 'up' : 'down'));
+    cards.appendChild(card('年化波动', pct(m.ann_vol_pct)));
+    cards.appendChild(card('夏普', num(m.sharpe, 2)));
+    cards.appendChild(card('最大回撤', pct(m.max_drawdown_pct), 'down'));
+    cards.appendChild(card('盈亏比 PF', num(m.profit_factor, 2)));
+    cards.appendChild(card('交易笔数', String(m.trades === undefined ? '—' : m.trades)));
+    cards.appendChild(card('成本合计', money(m.cost_total)));
+
+    LAST_RUN = root;
+    renderExpectation(root);
+    drawCurve(root.curve || []);
+
+    renderAttribution(root);
 
     var tHost = document.getElementById('trades');
     tHost.innerHTML = '';
@@ -1935,8 +1938,14 @@
   /* ---------- 参数与时间范围绑定 ---------- */
 
   function rerenderCharts() {
+    // 图是按容器真实像素画的：窗口一变就必须重画，否则会被 CSS 拉伸变形（这正是之前的毛病）
     if (LAST_CURVE && LAST_CURVE.length) drawCurve(LAST_CURVE);
     renderExpectation(LAST_RUN);
+    if (LAST_RUN) {
+      renderAttribution(LAST_RUN);
+      if (LAST_RUN.model && LAST_RUN.model.latest) renderModel(LAST_RUN.model);
+    }
+    if (LAST_CURVE && LAST_CURVE.length) renderIntraday();
   }
 
   function bindParams() {
