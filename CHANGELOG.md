@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.8] - 2026-11-09
+
+### 修复
+
+- 宿主读报告的目录没跟着 `QCTA_RUNS_DIR` 走：引擎写到隔离目录、界面还读 `runs/`，
+  导致 `qcta_report` 找不到报告（冒烟里表现为 1 项失败）。`runsDirOf()` 现在同样读该环境变量
+
 ## [0.6.7] - 2026-11-09
 
 ### 修复
