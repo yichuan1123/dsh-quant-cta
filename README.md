@@ -21,6 +21,7 @@
 | 模拟盘 | [python/qcta/paper.py](python/qcta/paper.py) | 逐日推进的可断点账本 + 前瞻日志 |
 | DSH 工具 | [lib/index.js](lib/index.js) | qcta_doctor / qcta_data / qcta_backtest / qcta_report / qcta_paper |
 | Web 面板 | [panel.html](panel.html) | /dsh-quant-cta/panel |
+| 客户端半身 | [client/client.js](client/client.js) | 在「开始」列表注册入口 + 右侧栏 tab（同源 iframe 套面板） |
 
 ## 安装
 
@@ -89,7 +90,10 @@ qcta_report action="get"
 qcta_paper  action="init"; qcta_paper action="step"
 ```
 
-面板：`http://127.0.0.1:58080/dsh-quant-cta/panel`
+面板有两条入口，指向同一个页面：
+
+- **右侧栏「开始」列表**里的「量化 CTA 工作台」（客户端插件注册的入口，点开就是 tab）
+- 直接访问 `http://127.0.0.1:58080/dsh-quant-cta/panel`
 
 面板背后的只读/管理路由（全部同源，无鉴权，只在本机回环地址上可用）：
 

@@ -35,3 +35,6 @@ jobs:
 
       - name: 插件冒烟（假 ctx + 真引擎）
         run: QCTA_PYTHON=python3 node tools/smoke.mjs
+
+      - name: 客户端半身冒烟（vm 沙箱）
+        run: node tools/smoke-client.mjs

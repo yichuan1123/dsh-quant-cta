@@ -2,6 +2,21 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-11-09
+
+### 新增
+
+- **客户端半身** `client/client.js`：在右侧栏「开始」列表注册「量化 CTA 工作台」入口，
+  点开是一个 tab（同源 iframe 指向 `/dsh-quant-cta/panel`）。之前只有宿主端，
+  所以在「开始」菜单里看不到这个插件
+- `tools/smoke-client.mjs`：在 vm 沙箱里跑 client bundle，校验注册面（tab 类型 / guide 入口 /
+  slot 内容）与渲染结果（iframe 指向面板），不需要浏览器与真 react
+
+### 变更
+
+- manifest 增加 `dsh.client.platform: web` 与 `exports["./client"]`
+- 面板入口两条：开始菜单里的「量化 CTA 工作台」与 `/dsh-quant-cta/panel` 直连
+
 ## [0.2.1] - 2026-11-09
 
 ### 安全加固
