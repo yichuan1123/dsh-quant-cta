@@ -240,7 +240,59 @@ assert(C.dailyStats([]) === null, '空序列返回 null')
 /* ── 11. 回归：文本不许是黑色（深色面板上等于隐形） ── */
 const blackLike = new Set(['#000', '#000000', 'black', 'rgb(0,0,0)', 'rgb(0, 0, 0)'])
 const textHosts = []
-for (const chart of [host1, host2, host3, host4, host5, host6, hostScale]) {
+
+/* ── 多序列折线（策略腿 / 品种累计盈亏）与缩放窗口 ── */
+const multiHost = node('div')
+const cum = C.cumSeries([
+  { sleeve: 'trend', symbol: 'rb', close_date: '2023-01-05', pnl: 100 },
+  { sleeve: 'trend', symbol: 'i', close_date: '2023-02-05', pnl: -40 },
+  { sleeve: 'xsec', symbol: 'rb', close_date: '2023-01-09', pnl: 10 },
+  { sleeve: 'xsec', symbol: 'm', close_date: '2023-03-01', pnl: 30 },
+], 'sleeve')
+assert(cum.length === 2, 'cumSeries 按策略腿分成 2 组（实际 ' + cum.length + '）')
+const trend = cum.find((g) => g.key === 'trend')
+assert(trend.total === 60, 'trend 累计 60（实际 ' + trend.total + '）')
+assert(trend.points.length === 2 && trend.points[0].y === 100 && trend.points[1].y === 60,
+  '累计序列是阶梯：首日 100、末日 60，当天盈亏不会提前一天记（实际 ' + JSON.stringify(trend.points) + '）')
+assert(cum[0].key === 'trend', '按累计盈亏降序：trend 在前')
+
+C.drawMultiLine(multiHost, {
+  series: [
+    { name: 'trend', color: '#4f8cff', points: trend.points },
+    { name: 'xsec', color: '#f0b429', points: cum.find((g) => g.key === 'xsec').points },
+  ],
+  height: 200,
+})
+const multiSvg = multiHost.children.filter((c) => c.tagName === 'svg')[0]
+assert(multiSvg !== undefined, 'drawMultiLine 生成了 SVG')
+const multiPaths = all(multiSvg, 'path')
+assert(multiPaths.length >= 2, '两条序列各画一条线（path 数 ' + multiPaths.length + '）')
+const multiTexts = all(multiSvg, 'text').map((t) => String(t.textContent))
+assert(multiTexts.some((t) => t.indexOf('trend') >= 0) && multiTexts.some((t) => t.indexOf('xsec') >= 0),
+  '图例里出现序列名')
+assert(multiTexts.some((t) => t.indexOf('滚轮缩放') >= 0), '多序列图也提示了缩放操作')
+
+/* 窗口缩放：状态与下标切片 */
+const zh = node('div')
+const z0 = C.zoomState(zh, 1000)
+assert(z0.i0 === 0 && z0.i1 === 999, '初始窗口覆盖全部数据')
+zh.__zoom = { n: 1000, i0: 500, i1: 599 }
+const pos500 = C.windowPositions(zh.__zoom, 1000)
+assert(pos500.length === 100 && pos500[0] === 500 && pos500[99] === 599, '缩放后只取窗口内下标')
+zh.__zoom = { n: 1000, i0: 0, i1: 999 }
+const posAll = C.windowPositions(zh.__zoom, 1000, 100)
+assert(posAll.length <= 101 && posAll[0] === 0 && posAll[posAll.length - 1] === 999,
+  '点太多时等步长抽稀但仍包含末点（' + posAll.length + ' 个）')
+const zReset = C.zoomState(node('div'), 5)
+assert(zReset.n === 5 && zReset.i1 === 4, '数据量变化时重建窗口')
+
+/* 空 / 单点序列不炸 */
+const emptyHost = node('div')
+C.drawMultiLine(emptyHost, { series: [] })
+const emptySvg = emptyHost.children.filter((c) => c.tagName === 'svg')[0]
+assert(emptySvg !== undefined && all(emptySvg, 'text').length >= 1, '空序列给出「没有数据」而不是崩溃')
+
+for (const chart of [host1, host2, host3, host4, host5, host6, hostScale, multiHost, emptyHost]) {
   for (const svg of chart.children.filter((c) => c.tagName === 'svg')) textHosts.push(svg)
 }
 let textCount = 0

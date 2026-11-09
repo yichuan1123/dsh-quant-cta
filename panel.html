@@ -26,6 +26,7 @@
   main { padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  h2 .hint { font-size: 11.5px; font-weight: 400; color: var(--muted); margin-left: 10px; letter-spacing: 0; }
   .card .k { font-size: 11.5px; color: var(--muted); letter-spacing: .4px; margin-bottom: 6px; }
   .card .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .v.up { color: var(--up); } .v.down { color: var(--down); }
@@ -119,11 +120,11 @@
     <div class="note" id="chartnote"></div>
   </section>
   <section>
-    <h2>策略腿归因</h2>
+    <h2>策略腿归因<span class="hint">累计净盈亏 · 悬停看当日数值 · 滚轮缩放</span></h2>
     <div id="sleeves"></div>
   </section>
   <section>
-    <h2>品种归因</h2>
+    <h2>品种归因<span class="hint">累计净盈亏（按 |净盈亏| 前 8 + 其余合并）· 滚轮缩放</span></h2>
     <div id="symbols"></div>
   </section>
   <section>
@@ -551,36 +552,49 @@
     renderExpectation(root);
     drawCurve(root.curve || []);
 
-    var sleeveRows = Object.keys(root.sleeves || {}).map(function (k) {
-      var s = root.sleeves[k];
-      return { name: k, strategy: s.strategy, alloc: s.alloc_pct, ret: s.return_pct, sharpe: s.sharpe, dd: s.max_drawdown_pct, trades: s.trades };
-    });
-    var sHost = document.getElementById('sleeves');
-    sHost.innerHTML = '';
-    sHost.appendChild(table(sleeveRows, [
-      { label: '策略腿', get: function (r) { return r.name; } },
-      { label: '策略', get: function (r) { return r.strategy; } },
-      { label: '资金占比', num: true, get: function (r) { return pct(r.alloc); } },
-      { label: '收益', num: true, get: function (r) { return pct(r.ret); },
-        cls: function (r) { return r.ret >= 0 ? 'up' : 'down'; } },
-      { label: '夏普', num: true, get: function (r) { return num(r.sharpe, 2); } },
-      { label: '最大回撤', num: true, get: function (r) { return pct(r.dd); } },
-      { label: '交易数', num: true, get: function (r) { return String(r.trades); } }
-    ]));
+    var runTrades = root.trades || [];
 
-    var symRows = Object.keys(root.symbols || {}).map(function (k) {
-      var s = root.symbols[k];
-      return { code: k, pnl: s.pnl, win: s.win_rate_pct, trades: s.trades };
+    // 策略腿归因：原来是张数字表，信息量低还看不出「什么时候赚的」。改成累计净盈亏折线。
+    var sHost = document.getElementById('sleeves');
+    var sleeveCum = cumSeries(runTrades, 'sleeve');
+    var sleeveColors = {};
+    sleeveCum.forEach(function (s, i) { sleeveColors[s.key] = SLEEVE_COLORS[i % SLEEVE_COLORS.length]; });
+    var sleeveSeries = sleeveCum.map(function (s) {
+      var meta = (root.sleeves || {})[s.key] || {};
+      var note = '';
+      if (meta.alloc_pct !== undefined) note = pct(meta.alloc_pct) + ' · 收益 ' + pct(meta.return_pct) +
+        ' · 夏普 ' + num(meta.sharpe, 2) + ' · 回撤 ' + pct(meta.max_drawdown_pct) + ' · ' + meta.trades + ' 笔';
+      return { name: s.key, color: sleeveColors[s.key], points: s.points, note: note };
     });
+    drawMultiLine(sHost, {
+      series: sleeveSeries, height: 220, label: '策略腿累计净盈亏',
+      tipFormat: function (v) { return money(v); },
+      empty: '还没有成交：跑一次回测后这里会显示每条腿的累计净盈亏。',
+    });
+
+    // 品种归因：28 个品种全画会糊成一片，取 |净盈亏| 前 8 名 + 其余合并成一条
     var yHost = document.getElementById('symbols');
-    yHost.innerHTML = '';
-    yHost.appendChild(table(symRows, [
-      { label: '品种', get: function (r) { return r.code; } },
-      { label: '净盈亏', num: true, get: function (r) { return money(r.pnl); },
-        cls: function (r) { return r.pnl >= 0 ? 'up' : 'down'; } },
-      { label: '胜率', num: true, get: function (r) { return pct(r.win); } },
-      { label: '交易数', num: true, get: function (r) { return String(r.trades); } }
-    ]));
+    var symCum = cumSeries(runTrades, 'symbol');
+    var top = symCum.slice().sort(function (a, b) { return Math.abs(b.total) - Math.abs(a.total); }).slice(0, 8);
+    var rest = symCum.filter(function (s) { return top.indexOf(s) < 0; });
+    var syColors = colorMap(top.map(function (s) { return s.key; }));
+    var symSeries = top.map(function (s) {
+      return { name: s.key, color: syColors[s.key], points: s.points, note: money(s.total) };
+    });
+    if (rest.length) {
+      var agg = {};
+      rest.forEach(function (s) {
+        s.points.forEach(function (p) { agg[p.x] = (agg[p.x] || 0) + p.y; });
+      });
+      var aggPts = Object.keys(agg).sort().map(function (d) { return { x: d, y: agg[d] }; });
+      symSeries.push({ name: '其余 ' + rest.length + ' 个', color: '#6f7683', points: aggPts,
+                       note: '(' + money(rest.reduce(function (a, s) { return a + s.total; }, 0)) + ')' });
+    }
+    drawMultiLine(yHost, {
+      series: symSeries, height: 260, label: '品种累计净盈亏',
+      tipFormat: function (v) { return money(v); },
+      empty: '还没有成交。',
+    });
 
     var tHost = document.getElementById('trades');
     tHost.innerHTML = '';
@@ -976,12 +990,108 @@
   }
 
   /** 动态折线图：刻度 + 参考线 + 极值/末值标记 + 叠加线 + 副轴 + 悬停十字线。 */
+  /**
+   * 缩放窗口：{i0, i1} 是原始点数组的下标区间。
+   * 所有图表共用一套「滚轮无级缩放 + 拖拽平移 + 双击复位」的交互，
+   * 状态挂在下标上（而不是像素上），容器尺寸变化后依然成立。
+   */
+  function zoomState(host, n) {
+    if (!host.__zoom || host.__zoom.n !== n) host.__zoom = { n: n, i0: 0, i1: Math.max(0, n - 1) };
+    return host.__zoom;
+  }
+
+  /** 窗口内的下标序列；点太多时按等步长抽稀（保序，多序列仍能对齐）。 */
+  function windowPositions(z, total, cap) {
+    cap = cap || 1400;
+    var i0 = Math.max(0, Math.min(z.i0, total - 1));
+    var i1 = Math.max(i0, Math.min(z.i1, total - 1));
+    var span = i1 - i0 + 1;
+    var pos = [];
+    if (span > cap) {
+      var step = Math.ceil(span / cap);
+      for (var i = i0; i <= i1; i += step) pos.push(i);
+      if (pos[pos.length - 1] !== i1) pos.push(i1);
+    } else {
+      for (var j = i0; j <= i1; j++) pos.push(j);
+    }
+    return pos;
+  }
+
+  /** 滚轮缩放（无级）+ 拖拽平移 + 双击复位。 */
+  function bindZoom(svg, hit, host, total, onRedraw) {
+    if (!hit || !hit.addEventListener) return;
+    hit.addEventListener('wheel', function (ev) {
+      if (total < 4) return;
+      if (ev.preventDefault) ev.preventDefault();
+      var z = zoomState(host, total);
+      var box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { left: 0, width: 1 };
+      var ratio = box.width ? (ev.clientX - box.left) / box.width : 0.5;
+      ratio = Math.max(0, Math.min(1, ratio));
+      var span = z.i1 - z.i0 + 1;
+      var anchor = z.i0 + span * ratio;
+      // 连续缩放：deltaY 越小步长越细，触控板也能平滑
+      var factor = Math.exp((ev.deltaY || 0) * 0.0016);
+      var newSpan = Math.round(span * factor);
+      newSpan = Math.max(12, Math.min(total, newSpan));
+      var newStart = Math.round(anchor - newSpan * ratio);
+      var maxStart = total - newSpan;
+      if (newStart < 0) newStart = 0;
+      if (newStart > maxStart) newStart = maxStart;
+      z.i0 = newStart;
+      z.i1 = newStart + newSpan - 1;
+      onRedraw();
+    }, { passive: false });
+    // 拖拽状态挂在 host 上：重绘会换掉整棵 SVG，闭包变量会跟着丢
+    hit.addEventListener('mousedown', function (ev) {
+      var z = zoomState(host, total);
+      if (z.i1 - z.i0 + 1 >= total) return;          // 没放大就没有可平移的余量
+      host.__drag = { x: ev.clientX, i0: z.i0, i1: z.i1 };
+      if (ev.preventDefault) ev.preventDefault();
+      if (hit.style) hit.style.cursor = 'grabbing';
+    });
+    var endDrag = function () {
+      host.__drag = null;
+      if (hit.style) hit.style.cursor = 'crosshair';
+    };
+    hit.addEventListener('mouseup', endDrag);
+    hit.addEventListener('mouseleave', endDrag);
+    hit.addEventListener('mousemove', function (ev) {
+      var drag = host.__drag;
+      if (!drag) return;
+      var z = zoomState(host, total);
+      var box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { width: 1 };
+      var span = drag.i1 - drag.i0 + 1;
+      var dx = box.width ? (ev.clientX - drag.x) / box.width : 0;
+      var shift = Math.round(-dx * span);
+      var start = drag.i0 + shift;
+      if (start < 0) start = 0;
+      if (start > total - span) start = total - span;
+      z.i0 = start;
+      z.i1 = start + span - 1;
+      onRedraw();
+    });
+    hit.addEventListener('dblclick', function () {
+      var z = zoomState(host, total);
+      z.i0 = 0;
+      z.i1 = total - 1;
+      onRedraw();
+    });
+  }
+
   function drawLine(host, opts) {
+    var raw = opts.points || [];
+    var z = zoomState(host, raw.length);
+    var redraw = function () { paintLine(host, opts, z); };
+    redraw();
+  }
+
+  function paintLine(host, opts, z) {
     var W = hostWidth(host, 660), H = opts.height || 230;
     var pad = { l: 64, r: 16, t: 18, b: 26 };
     if (opts.secondary) pad.r = 58;
     var raw = opts.points || [];
-    var pts = lttb(raw, 800);
+    var pos = windowPositions(z || zoomState(host, raw.length), raw.length);
+    var pts = pos.map(function (i) { return raw[i]; });
     var svg = makeSvg(host, W, H, opts.label || '折线图');
     if (pts.length < 2) {
       var t0 = svgEl('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle', fill: COLORS.muted, 'font-size': '12' });
@@ -1028,7 +1138,8 @@
     if (opts.threshold !== undefined && opts.threshold !== null) {
       var ty = Y(opts.threshold);
       svg.appendChild(svgEl('line', { x1: pad.l, x2: pad.l + iw, y1: ty, y2: ty, class: opts.thresholdClass || 'halt-line' }));
-      var tl = svgEl('text', { x: pad.l + iw - 4, y: ty - 5, 'text-anchor': 'end', fill: COLORS.down, 'font-size': '10' });
+      var tyLab = Math.max(pad.t + 10, Math.min(pad.t + ih - 4, ty - 5));
+      var tl = svgEl('text', { x: pad.l + 6, y: tyLab, 'text-anchor': 'start', fill: COLORS.down, 'font-size': '10' });
       tl.textContent = opts.thresholdLabel || ('阈值 ' + opts.threshold);
       svg.appendChild(tl);
     }
@@ -1059,14 +1170,15 @@
       var ov = overlays[oi];
       if (!ov.points || ov.points.length < 2) continue;
       var od = '';
-      for (var oj = 0; oj < ov.points.length; oj++) {
-        var oy = Y(ov.points[oj].y);
+      var olen = Math.min(pos.length, ov.points.length);
+      for (var oj = 0; oj < olen; oj++) {
+        var oy = Y(ov.points[pos[oj]].y);
         od += (oj === 0 ? 'M' : ' L') + X(oj).toFixed(2) + ' ' + oy.toFixed(2);
       }
       svg.appendChild(svgEl('path', { d: od, fill: 'none', stroke: ov.color || '#f0b429',
                                       'stroke-width': '1.3', 'stroke-dasharray': '5 4', opacity: '0.9' }));
       // 标签放起点上方并加底色块：末点那边有白点和极值标注；无底色时小字压在网格上很难读
-      var firstO = ov.points[0];
+      var firstO = ov.points[pos[0]];
       var labelTxt = ov.label || '';
       var ly = Y(firstO.y) - 8;
       if (ly < pad.t + 12) ly = pad.t + 12;      // 别顶出画布
@@ -1080,7 +1192,8 @@
 
     // 副轴：独立刻度的第二条线（例如滚动波动率）
     if (opts.secondary && opts.secondary.points && opts.secondary.points.length >= 2) {
-      var sec = opts.secondary.points;
+      var secAll = opts.secondary.points;
+      var sec = pos.map(function (i) { return secAll[Math.min(i, secAll.length - 1)]; });
       var sLo = Math.min.apply(null, sec.map(function (p) { return p.y; }));
       var sHi = Math.max.apply(null, sec.map(function (p) { return p.y; }));
       if (sHi === sLo) sHi = sLo + 1;
@@ -1184,8 +1297,217 @@
         tip(host, null);
       });
     }
+    bindZoom(svg, hit, host, raw.length, function () { paintLine(host, opts, z || zoomState(host, raw.length)); });
+    // 缩放提示：只在能交互时给一句，避免用户不知道有这功能
+    if (raw.length > 120) {
+      var zh = svgEl('text', { x: pad.l + iw - 4, y: pad.t + ih - 8, 'text-anchor': 'end',
+                               fill: '#6f7683', 'font-size': '9.5', opacity: '0.85' });
+      zh.textContent = '滚轮缩放 · 拖拽平移 · 双击复位';
+      svg.appendChild(zh);
+    }
   }
 
+
+  /* ================= 多序列折线（累计盈亏）：替代原来的数字表 ================= */
+
+  var SLEEVE_COLORS = ["#4f8cff", "#f0b429", "#38b48b", "#c96bd8", "#e2703a"];
+
+  /** 按某个字段把成交汇总成「累计净盈亏」序列（只在该品种/腿有平仓时前进一步，是阶梯线）。 */
+  function cumSeries(trades, keyField) {
+    var groups = {};
+    for (var i = 0; i < trades.length; i++) {
+      var t = trades[i];
+      var k = t[keyField];
+      if (!k) continue;
+      if (!groups[k]) groups[k] = { key: k, items: [], total: 0, wins: 0, n: 0 };
+      groups[k].items.push(t);
+      groups[k].total += (t.pnl || 0);
+      groups[k].n += 1;
+      if ((t.pnl || 0) > 0) groups[k].wins += 1;
+    }
+    var out = [];
+    Object.keys(groups).forEach(function (k) {
+      var g = groups[k];
+      g.items.sort(function (a, b) { return String(a.close_date) < String(b.close_date) ? -1 : 1; });
+      var acc = 0, pts = [], prev = null;
+      for (var j = 0; j < g.items.length; j++) {
+        var d = String(g.items[j].close_date);
+        // 先结算「上一日」：它的累计值不包含今天这笔，否则阶梯会提前一天跳
+        if (prev !== null && prev !== d) pts.push({ x: prev, y: acc });
+        acc += (g.items[j].pnl || 0);
+        prev = d;
+      }
+      if (prev !== null) pts.push({ x: prev, y: acc });
+      out.push({ key: k, points: pts, total: g.total, trades: g.n, wins: g.wins });
+    });
+    out.sort(function (a, b) { return b.total - a.total; });
+    return out;
+  }
+
+  /**
+   * 多序列折线图。
+   * 与 drawLine 共用窗口缩放（滚轮 / 拖拽 / 双击复位）。
+   * 悬停时同时给出「该日期每条线的累计值」，这正是原来那张数字表说不清的东西。
+   */
+  function drawMultiLine(host, opts) {
+    var z = zoomState(host, 0);
+    paintMulti(host, opts, z);
+  }
+
+  function paintMulti(host, opts, z) {
+    var W = hostWidth(host, 660), H = opts.height || 240;
+    var pad = { l: 64, r: 16, t: 22, b: 26 };
+    var series = (opts.series || []).filter(function (s) { return s.points && s.points.length; });
+    var svg = makeSvg(host, W, H, opts.label || "多序列折线");
+    if (!series.length) {
+      var t0 = svgEl("text", { x: W / 2, y: H / 2, "text-anchor": "middle", fill: COLORS.muted, "font-size": "12" });
+      t0.textContent = opts.empty || "没有数据";
+      svg.appendChild(t0);
+      return;
+    }
+    // 合并 x 轴（各序列的平仓日不同，必须先并集）
+    var dateSet = {};
+    series.forEach(function (s) { s.points.forEach(function (p) { dateSet[p.x] = true; }); });
+    var xs = Object.keys(dateSet).sort();
+    var zz = zoomState(host, xs.length);
+    zz.n = xs.length;
+    if (zz.i1 >= xs.length) zz.i1 = xs.length - 1;
+    var pos = windowPositions(zz, xs.length);
+    var visibleDates = pos.map(function (i) { return xs[i]; });
+    var xIndex = {};
+    for (var xi = 0; xi < xs.length; xi++) xIndex[xs[xi]] = xi;
+
+    // 每条序列在可见窗口内的取值（没有成交的日子沿用上一次的值）
+    var rows = series.map(function (s) {
+      var map = {};
+      for (var i = 0; i < s.points.length; i++) map[s.points[i].x] = s.points[i].y;
+      var vals = [], last = 0, seen = false;
+      for (var j = 0; j < xs.length; j++) {
+        if (map[xs[j]] !== undefined) { last = map[xs[j]]; seen = true; }
+        vals.push({ v: seen ? last : null, seen: seen });
+      }
+      // 累计值会一直保持：首笔之前为空（没数据），之后一路延伸到窗口末端。
+      // 不延伸的话，只成交过一两次的品种会画成一截悬空的横线，看着像错误。
+      for (var q = vals.length - 1; q >= 0; q--) {
+        if (vals[q].v === null) continue;
+        var nv = vals[q].v;
+        for (var k2 = q + 1; k2 < vals.length && vals[k2].v === null; k2++) vals[k2] = { v: nv, seen: true, hold: true };
+        break;
+      }
+      var flat = [];
+      for (var m2 = 0; m2 < vals.length; m2++) flat.push(vals[m2].v);
+      return { def: s, vals: flat };
+    });
+
+    var lo = 0, hi = 0;
+    rows.forEach(function (r) {
+      for (var i = 0; i < pos.length; i++) {
+        var v = r.vals[pos[i]];
+        if (v === null) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    });
+    if (hi === lo) { hi = lo + 1; }
+    var padY = (hi - lo) * 0.08;
+    lo -= padY; hi += padY;
+    var iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+    function X(i) { return pad.l + iw * i / Math.max(1, pos.length - 1); }
+    function Y(v) { return pad.t + ih - ih * (v - lo) / (hi - lo); }
+
+    var ticks = niceTicks(lo, hi, 4);
+    for (var ti = 0; ti < ticks.length; ti++) {
+      var yv = Y(ticks[ti]);
+      svg.appendChild(svgEl("line", { x1: pad.l, x2: pad.l + iw, y1: yv, y2: yv, class: "grid-line" }));
+      var lb = svgEl("text", { x: pad.l - 8, y: yv + 3.5, "text-anchor": "end" });
+      lb.setAttribute("class", "axis");
+      lb.textContent = fmtAxis(ticks[ti], opts.unit);
+      svg.appendChild(lb);
+    }
+    if (lo < 0 && hi > 0) {
+      svg.appendChild(svgEl("line", { x1: pad.l, x2: pad.l + iw, y1: Y(0), y2: Y(0), stroke: "#3a3f4b" }));
+    }
+    var tickObjs = pos.map(function (i) { return { x: xs[i], i: i }; });
+    var ticksX = timeTicks(tickObjs.map(function (o, i) { return { x: o.x, i: i }; }), 6);
+    for (var tx = 0; tx < ticksX.length; tx++) {
+      var lab = svgEl("text", { x: X(ticksX[tx].i), y: H - 6, "text-anchor": "middle" });
+      lab.setAttribute("class", "axis");
+      lab.textContent = ticksX[tx].label;
+      svg.appendChild(lab);
+    }
+
+    // 画线
+    rows.forEach(function (r) {
+      var d = "", started = false;
+      for (var i = 0; i < pos.length; i++) {
+        var v = r.vals[pos[i]];
+        if (v === null) { started = false; continue; }
+        d += (started ? " L" : " M") + X(i).toFixed(2) + " " + Y(v).toFixed(2);
+        started = true;
+      }
+      if (d) {
+        svg.appendChild(svgEl("path", { d: d, fill: "none", stroke: r.def.color, "stroke-width": "1.7",
+                                        "stroke-linejoin": "round", opacity: "0.95" }));
+      }
+    });
+
+    // 图例（带终值，替代原来表里那一列）
+    var lx = pad.l + 2, ly = pad.t - 9;
+    rows.forEach(function (r) {
+      svg.appendChild(svgEl("rect", { x: lx, y: ly - 6, width: 8, height: 8, rx: "2", fill: r.def.color }));
+      var lab = svgEl("text", { x: lx + 12, y: ly + 1, "text-anchor": "start", fill: "#9aa3b2", "font-size": "10" });
+      lab.textContent = r.def.name + (r.def.note ? " " + r.def.note : "");
+      svg.appendChild(lab);
+      lx += 16 + String(lab.textContent).length * 5.6;
+      if (lx > W - 120) { lx = pad.l + 2; ly += 13; }
+    });
+
+    // 悬停：十字线 + 各序列该日值
+    var cross = svgEl("line", { x1: 0, x2: 0, y1: pad.t, y2: pad.t + ih, stroke: "#5b8cff",
+                                "stroke-width": "1", "stroke-dasharray": "3 3", opacity: "0" });
+    svg.appendChild(cross);
+    var dots = rows.map(function (r) {
+      var c = svgEl("circle", { r: "3.2", fill: r.def.color, opacity: "0" });
+      svg.appendChild(c);
+      return c;
+    });
+    var hit = svgEl("rect", { x: pad.l, y: pad.t, width: iw, height: ih, fill: "transparent" });
+    if (hit.style) hit.style.cursor = "crosshair";
+    svg.appendChild(hit);
+    if (hit.addEventListener) {
+      hit.addEventListener("mousemove", function (ev) {
+        var box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { left: 0, width: W };
+        var bw = box.width || W;
+        var scale = W / bw;
+        var xUser = (ev.clientX - box.left) * scale;
+        var ratio = iw > 0 ? (xUser - pad.l) / iw : 0;
+        ratio = Math.max(0, Math.min(1, ratio));
+        var idx = Math.round(ratio * (pos.length - 1));
+        idx = Math.max(0, Math.min(pos.length - 1, idx));
+        cross.setAttribute("x1", X(idx)); cross.setAttribute("x2", X(idx)); cross.setAttribute("opacity", "1");
+        var lines = [String(xs[pos[idx]])];
+        rows.forEach(function (r, k) {
+          var v = r.vals[pos[idx]];
+          if (v === null) return;
+          var c = dots[k];
+          c.setAttribute("cx", X(idx)); c.setAttribute("cy", Y(v)); c.setAttribute("opacity", "1");
+          lines.push(r.def.name + " " + (v >= 0 ? "+" : "") + Math.round(v).toLocaleString());
+        });
+        if (lines.length === 1) lines.push("这笔之前还没有平仓");
+        var cssX = Math.max(60, Math.min(bw - 60, X(idx) / scale));
+        tip(host, lines.join("　"), cssX, 16);
+      });
+      hit.addEventListener("mouseleave", function () {
+        cross.setAttribute("opacity", "0");
+        dots.forEach(function (c) { c.setAttribute("opacity", "0"); });
+        tip(host, null);
+      });
+    }
+    bindZoom(svg, hit, host, xs.length, function () { paintMulti(host, opts, zz); });
+    var zh = svgEl("text", { x: pad.l + iw - 4, y: pad.t + ih - 8, "text-anchor": "end", fill: "#6f7683", "font-size": "9.5" });
+    zh.textContent = "滚轮缩放 · 拖拽平移 · 双击复位";
+    svg.appendChild(zh);
+  }
   /** 环形饼图：权重分布 + 上限标记。 */
   function drawDonut(host, opts) {
     var size = 300, cx = size / 2, cy = size / 2 - 8, rOut = 112, rIn = 68;
@@ -1277,9 +1599,17 @@
 
   /** 逐日收益柱图（正绿负红）+ 可选累计线。 */
   function drawBars(host, opts) {
+    var all = opts.items || [];
+    var z = zoomState(host, all.length);
+    return paintBars(host, opts, z);
+  }
+
+  function paintBars(host, opts, z) {
     var W = hostWidth(host, 660), H = opts.height || 210;
     var pad = { l: 58, r: 56, t: 18, b: 24 };   // 右侧留给累计线标签
-    var items = opts.items || [];
+    var allItems = opts.items || [];
+    var pos = windowPositions(z || zoomState(host, allItems.length), allItems.length);
+    var items = pos.map(function (i) { return allItems[i]; });
     var svg = makeSvg(host, W, H, '逐日收益柱图');
     if (!items.length) {
       var t = svgEl('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle', fill: COLORS.muted, 'font-size': '12' });
@@ -1369,7 +1699,8 @@
     }
     // 副轴：滚动波动率（独立刻度，画在右轴）
     if (opts.secondary && opts.secondary.points && opts.secondary.points.length >= 2) {
-      var sec = opts.secondary.points;
+      var secAll = opts.secondary.points;
+      var sec = pos.map(function (i) { return secAll[Math.min(i, secAll.length - 1)]; });
       var validSec = sec.filter(function (p) { return p.y !== null && isFinite(p.y); });
       var sLo = Math.min.apply(null, validSec.map(function (p) { return p.y; }));
       var sHi = Math.max.apply(null, validSec.map(function (p) { return p.y; }));
@@ -1427,6 +1758,9 @@
       });
       hit.addEventListener('mouseleave', function () { tip(host, null); });
     }
+    bindZoom(svg, hit, host, allItems.length, function () {
+      paintBars(host, opts, z || zoomState(host, allItems.length));
+    });
     return { bound: bound, clipped: clipped };
   }
 
@@ -1670,6 +2004,8 @@
   // 供自动化测试 / 浏览器调试用：不参与渲染逻辑，只是把纯函数拿出来
   window.__dshQuantCtaCharts = {
     drawLine: drawLine, drawDonut: drawDonut, drawBars: drawBars, drawSectorBars: drawSectorBars,
+    drawMultiLine: drawMultiLine, cumSeries: cumSeries,
+    zoomState: zoomState, windowPositions: windowPositions,
     niceTicks: niceTicks, colorMap: colorMap, sectorColor: sectorColor, constraintsText: constraintsText,
     fmtAxis: fmtAxis, lttb: lttb, timeTicks: timeTicks, rollingVol: rollingVol, hostWidth: hostWidth,
     dailyStats: dailyStats,
