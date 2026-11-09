@@ -43,8 +43,20 @@ def render_markdown(result, meta=None):
     a("| 区间 | %s → %s（%d 个交易日） |" % (m.get("start"), m.get("end"), m.get("trading_days", 0)))
     a("| 初始资金 | %s |" % _money(m.get("initial_capital")))
     a("| 目标年化波动 | %s |" % _p((result.cfg.target_vol or 0) * 100))
-    a("| 滑点假设 | %s 跳/笔 |" % _num(result.cfg.slip_ticks, 2))
+    _slip = getattr(result.cfg, "slip_by_symbol", None) or {}
+    a("| 滑点假设 | %s |" % (
+        ("按品种估（%s 跳）" % "/".join("%g" % v for v in sorted(set(_slip.values()))))
+        if _slip else ("%s 跳/笔" % _num(result.cfg.slip_ticks, 2))))
     a("| 策略腿 | %s |" % ", ".join("%s(%.0f%%)" % (s.name, s.alloc * 100) for s in result.sleeves))
+    params = []
+    for s in result.sleeves:
+        d = dict(getattr(s.strategy, "__dict__", {}))
+        kv = {k: v for k, v in d.items() if k in ("entry", "exit", "lookback", "rebalance",
+                                                  "top_frac", "top_n", "adx_min", "enabled")}
+        if kv:
+            params.append("%s:%s" % (s.name, " ".join("%s=%s" % (k, v) for k, v in sorted(kv.items()))))
+    if params:
+        a("| 策略参数 | %s |" % "；".join(params))
     a("")
 
     a("## 核心指标")
@@ -158,7 +170,13 @@ def render_markdown(result, meta=None):
     a("")
     a("- 信号在 **t 日收盘** 产生，**t+1 日开盘** 成交；不使用当日收盘成交（防未来函数）")
     a("- 手数按 ATR 波动率预算换算，组合目标年化波动 %s" % _p((result.cfg.target_vol or 0) * 100))
-    a("- 滑点 %s 跳/笔，手续费按合约规格表（近似值，以交易所公告为准）" % _num(result.cfg.slip_ticks, 2))
+    slip_map = getattr(result.cfg, "slip_by_symbol", None) or {}
+    if slip_map:
+        vals = sorted(set(slip_map.values()))
+        a("- 滑点**按品种估**（%s 跳，取 data/costs.json；口径见 docs/SWEEP.md），手续费按合约规格表（近似值）"
+          % ("/".join("%g" % v for v in vals)))
+    else:
+        a("- 滑点 %s 跳/笔，手续费按合约规格表（近似值，以交易所公告为准）" % _num(result.cfg.slip_ticks, 2))
     a("- 单品种风险上限 %s，名义杠杆上限 %s 倍" % (_p(result.cfg.max_symbol_risk * 100), _num(result.cfg.max_leverage, 2)))
     a("- 回撤熔断：组合回撤达 %s 后停止开新仓" % _p(result.cfg.max_drawdown_halt * 100))
     a("- 期末强制平仓，使成交与统计闭合")
@@ -241,10 +259,14 @@ def write_reports(out_dir, result, meta=None, n_trials=1):
             "target_vol": result.cfg.target_vol,
             "atr_period": result.cfg.atr_period,
             "slip_ticks": result.cfg.slip_ticks,
+            # 逐品种滑点必须原样落盘，否则「报了 1 跳其实是 1-2 跳」——复现不了，也会误导读报告的人
+            "slip_mode": "per_symbol" if getattr(result.cfg, "slip_by_symbol", None) else "flat",
+            "slip_by_symbol": dict(getattr(result.cfg, "slip_by_symbol", {}) or {}),
             "max_leverage": result.cfg.max_leverage,
             "max_drawdown_halt": result.cfg.max_drawdown_halt,
             "max_symbol_risk": result.cfg.max_symbol_risk,
-            "sleeves": [{"name": s.name, "strategy": s.strategy.name, "alloc": s.alloc} for s in result.sleeves],
+            "sleeves": [{"name": s.name, "strategy": s.strategy.name, "alloc": s.alloc,
+                         "params": dict(getattr(s.strategy, "__dict__", {}))} for s in result.sleeves],
             "sizing": getattr(result.cfg, "sizing", "vol_parity"),
             "model_method": getattr(result.cfg, "model_method", None),
             "model_rebalance": getattr(result.cfg, "model_rebalance", None),
