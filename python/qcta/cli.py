@@ -11,9 +11,8 @@ import os
 import sys
 
 from . import __version__
-from .data import (DataBundle, TqSdkError, cache_dir, credentials_path,
-                   fetch_tqsdk, load_bundle, load_cache, load_credentials,
-                   save_cache, slice_bars, synthetic_bars)
+from .data import (TqSdkError, cache_dir, credentials_path, fetch_tqsdk,
+                   load_bundle, load_cache, load_credentials, save_cache)
 from .engine import Backtester
 from .metrics import compute_metrics
 from .report import render_markdown, write_reports

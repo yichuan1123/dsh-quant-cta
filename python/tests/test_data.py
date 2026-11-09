@@ -1,6 +1,11 @@
 import unittest
 
-from qcta.data import load_bundle, synthetic_bars, trading_days
+import os
+import tempfile
+import unittest
+
+from qcta import data as data_mod
+from qcta.data import load_bundle, save_cache, synthetic_bars, trading_days
 from qcta.specs import get_spec
 
 
@@ -33,9 +38,35 @@ class TestSyntheticData(unittest.TestCase):
             self.assertLess(dt.date.fromisoformat(d).weekday(), 5)
 
     def test_bundle_without_credentials_falls_back_to_synthetic(self):
-        b = load_bundle(["rb"], "2020-01-01", "2020-06-30", prefer_live=False)
-        self.assertEqual(b.source, "synthetic")
-        self.assertTrue(any("合成" in n for n in b.notes))
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.environ.get("QCTA_DATA_DIR")
+            os.environ["QCTA_DATA_DIR"] = tmp
+            try:
+                b = load_bundle(["rb"], "2020-01-01", "2020-06-30", prefer_live=False)
+                self.assertEqual(b.source, "synthetic")
+                self.assertTrue(any("合成" in n for n in b.notes))
+            finally:
+                if old is None:
+                    os.environ.pop("QCTA_DATA_DIR", None)
+                else:
+                    os.environ["QCTA_DATA_DIR"] = old
+
+    def test_refresh_keeps_cache_instead_of_synthetic(self):
+        """--refresh 但没开 live 时，必须继续用缓存，不能静默换成合成数据。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            old = os.environ.get("QCTA_DATA_DIR")
+            os.environ["QCTA_DATA_DIR"] = tmp
+            try:
+                bars = synthetic_bars("rb", "2020-01-01", "2020-06-30", get_spec("rb"))
+                save_cache("rb", bars)
+                b = load_bundle(["rb"], "2020-01-01", "2020-06-30", prefer_live=False, refresh=True)
+                self.assertEqual(b.source, "cache", "refresh 不该把缓存换成 synthetic")
+                self.assertEqual(len(b.bars_by_code["rb"]), len(bars))
+            finally:
+                if old is None:
+                    os.environ.pop("QCTA_DATA_DIR", None)
+                else:
+                    os.environ["QCTA_DATA_DIR"] = old
 
 
 if __name__ == "__main__":

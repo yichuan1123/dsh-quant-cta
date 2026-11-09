@@ -115,7 +115,7 @@ class Backtester:
 
     # ── 主循环 ────────────────────────────────────────────
 
-    def run(self, on_day=None) -> BacktestResult:
+    def run(self, on_day=None, liquidate=True) -> BacktestResult:
         if not self.all_dates:
             raise ValueError("所选区间内没有任何行情数据，检查开始/结束日期或数据源")
         sleeves = self.build_sleeves()
@@ -180,17 +180,29 @@ class Backtester:
                 on_day(date, sleeves, aggregate[-1])
             prev_date = date
 
-        # 收尾：全部按最后收盘价平掉，让成交与统计闭合
+        # 收尾：回测按最后收盘价强平，让成交与统计闭合。
+        # paper 传 liquidate=False —— 模拟盘要保留持仓，那才是账户真实状态。
         last = self.all_dates[-1]
-        for s in sleeves:
-            prices = {c: (self.index.get(c, {}).get(last).close if self.index.get(c, {}).get(last) else 0.0)
-                      for c in list(s.account.positions.keys())}
-            s.account.close_all(prices, last, self.specs, self.cfg.slip_ticks)
+        if liquidate:
+            for s in sleeves:
+                prices = {c: (self.index.get(c, {}).get(last).close if self.index.get(c, {}).get(last) else 0.0)
+                          for c in list(s.account.positions.keys())}
+                s.account.close_all(prices, last, self.specs, self.cfg.slip_ticks)
         if aggregate:
+            # 总权益与各腿曲线必须同时对齐到「收尾之后」的状态，
+            # 否则分腿归因加起来对不上 headline（差的就是强平成本）。
             aggregate[-1].equity = sum(s.account.equity() for s in sleeves)
-            aggregate[-1].gross_exposure = 0.0
-            aggregate[-1].net_exposure = 0.0
-            aggregate[-1].margin = 0.0
+            if liquidate:
+                aggregate[-1].gross_exposure = 0.0
+                aggregate[-1].net_exposure = 0.0
+                aggregate[-1].margin = 0.0
+            for s in sleeves:
+                if s.account.curve:
+                    s.account.curve[-1].equity = s.account.equity()
+                    if liquidate:
+                        s.account.curve[-1].gross_exposure = 0.0
+                        s.account.curve[-1].net_exposure = 0.0
+                        s.account.curve[-1].margin = 0.0
 
         return BacktestResult(self.cfg, self.bundle, sleeves, self.all_dates, aggregate)
 

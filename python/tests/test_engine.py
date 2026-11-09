@@ -77,6 +77,34 @@ class TestEngineInvariants(unittest.TestCase):
         self.assertEqual(a.metrics_final_equity() if hasattr(a, "metrics_final_equity") else a.aggregate[-1].equity,
                          b.aggregate[-1].equity)
 
+    def test_sleeve_equity_sums_to_total(self):
+        """分腿归因的期末权益之和必须等于总权益（差强平成本就是 bug）。"""
+        bars = flat(30) + [Bar("2020-02-01", 120, 121, 119, 120, 1000, 1000)]
+        bars += [Bar("2020-02-%02d" % (d + 2), 120, 120, 120, 120, 1000, 1000) for d in range(6)]
+        cfg = dict(
+            start_date="", end_date="", initial_capital=1_000_000.0, target_vol=0.15,
+            atr_period=5, slip_ticks=1.0, max_leverage=2.0, max_drawdown_halt=0.9,
+            max_symbol_risk=0.5,
+            sleeves=({"name": "trend", "strategy": "trend", "alloc": 0.6, "kwargs": {"entry": 5, "exit": 3}},
+                     {"name": "xsec", "strategy": "xsec", "alloc": 0.4, "kwargs": {"lookback": 10, "rebalance": 5}}),
+        )
+        res = Backtester(EngineConfig(**cfg), make_bundle({"rb": bars})).run()
+        total = res.aggregate[-1].equity
+        sleeve_sum = sum(s.account.curve[-1].equity for s in res.sleeves)
+        self.assertAlmostEqual(sleeve_sum, total, delta=0.01)
+
+    def test_liquidate_false_keeps_positions(self):
+        bars = flat(20) + [Bar("2020-01-21", 100, 130, 99, 130, 1000, 1000)]
+        bars += [Bar("2020-01-%02d" % (d + 22), 130, 130, 130, 130, 1000, 1000) for d in range(5)]
+        opts = dict(
+            start_date="", end_date="", initial_capital=1_000_000.0, target_vol=0.15,
+            atr_period=5, slip_ticks=1.0, max_leverage=2.0, max_drawdown_halt=0.9,
+            max_symbol_risk=0.5,
+            sleeves=({"name": "trend", "strategy": "trend", "alloc": 1.0, "kwargs": {"entry": 5, "exit": 3}},),
+        )
+        res = Backtester(EngineConfig(**opts), make_bundle({"rb": bars})).run(liquidate=False)
+        self.assertTrue(any(s.account.positions for s in res.sleeves), "未平仓时应保留持仓")
+
     def test_drawdown_halt_stops_new_open(self):
         # 先稳定上涨（触发多头），随后连续暴跌（权益大幅回撤）→ 熔断应被置位
         up = [Bar("2020-01-%02d" % (i + 1), 100 + 2 * i, 101 + 2 * i, 99 + 2 * i, 100 + 2 * i, 1000, 1000)

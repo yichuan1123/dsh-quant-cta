@@ -338,7 +338,13 @@ def load_bundle(codes, start: str, end: str, prefer_live: bool = False, refresh:
                 notes.append("%s: 天勤实时拉取 %d 根，adj_type=%s" % (code, len(bars), adj))
                 src = "tqsdk"
             except TqSdkError as exc:
-                notes.append("%s: 天勤不可用（%s），回落合成数据" % (code, exc))
+                notes.append("%s: 天勤不可用（%s）" % (code, exc))
+        # refresh 但没开 live / 或 live 失败：有缓存就必须用缓存，
+        # 绝不能因为「刷新」把真实数据静默换成合成数据。
+        if not bars and cached:
+            bars = cached
+            src = "cache"
+            notes.append("%s: 使用本地缓存 %d 根" % (code, len(cached)))
         if not bars:
             bars = synthetic_bars(code, "2016-01-01", end or _dt.date.today().isoformat(), spec)
             src = "synthetic"

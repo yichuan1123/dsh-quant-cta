@@ -18,4 +18,7 @@
 - 模拟盘：可断点的逐日推进账本 + 前瞻日志（幂等）
 - DSH 插件：`qcta_doctor` / `qcta_data` / `qcta_backtest` / `qcta_report` / `qcta_paper` 五个工具
 - Web 面板：`/dsh-quant-cta/panel`（净值曲线、指标卡、策略腿与品种归因、模拟盘持仓）
-- 32 个单元测试，含「期末权益 − 初始资金 == Σ交易净盈亏」恒等式与「信号在 t+1 开盘成交」的反未来函数测试
+- 35 个单元测试，含「期末权益 − 初始资金 == Σ交易净盈亏」恒等式、分腿与总权益一致、以及「信号在 t+1 开盘成交」的反未来函数测试
+- `tools/verify_invariants.py`：对任意一份报告跑三条账本恒等式核验
+- `tools/smoke.mjs`：用假 ctx 装配插件、调真引擎的冒烟测试
+- GitHub Actions CI（Python 单测 + 回测 + 恒等式 + 插件语法 + 冒烟）

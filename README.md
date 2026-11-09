@@ -126,8 +126,11 @@ python -m qcta paper step --live
 ## 开发
 
 ```bash
-cd python && python -m unittest discover -s tests -v   # 32 个单测
-node --check lib/index.js                               # 插件语法
+python -m unittest discover -s python/tests -t python   # 35 个单测
+node --check lib/index.js                              # 插件语法
+node tools/smoke.mjs                                   # 插件冒烟（假 ctx + 真引擎）
+cd python && python -m qcta backtest --pool starter --start 2021-01-01 --name ci_run
+python tools/verify_invariants.py runs/ci_run          # 三条账本恒等式
 ```
 
 ## 许可证

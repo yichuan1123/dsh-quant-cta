@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 单元测试（纯标准库，不装 pandas/tqsdk）
+        run: python -m unittest discover -s python/tests -t python -v
+
+      - name: 端到端回测（合成数据）
+        working-directory: python
+        run: python -m qcta backtest --pool starter --start 2021-01-01 --name ci_run
+
+      - name: 账本恒等式核验
+        run: python tools/verify_invariants.py runs/ci_run
+
+      - name: 插件语法
+        run: node --check lib/index.js
+
+      - name: 插件冒烟（假 ctx + 真引擎）
+        run: QCTA_PYTHON=python3 node tools/smoke.mjs

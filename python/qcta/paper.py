@@ -19,7 +19,7 @@ import time
 from .data import load_bundle
 from .engine import Backtester
 from .metrics import compute_metrics
-from .specs import get_spec, resolve_pool
+from .specs import resolve_pool
 from .types import EngineConfig
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -149,7 +149,7 @@ def step(live: bool = False, quiet: bool = False):
     def on_day(date, sleeves, record):
         collected.append(_journal_entry(date, sleeves, record))
 
-    result = bt.run(on_day=on_day)
+    result = bt.run(on_day=on_day, liquidate=False)
 
     existing = {e["date"] for e in state["journal"]}
     new_entries = [e for e in collected if e["date"] not in existing]
@@ -157,6 +157,8 @@ def step(live: bool = False, quiet: bool = False):
     state["last_date"] = dates[-1]
     state["data_source"] = bundle.source
     state["notes"] = bundle.notes
+    # liquidate=False 已保证「曲线 / 成交 / 分腿」三者口径一致，
+    # 直接用回测的 aggregate 即可，不必再另造一条曲线。
     state["metrics"] = compute_metrics(result.aggregate, result.trades, cfg.initial_capital, cfg.risk_free, result.fills)
     state["positions"] = collected[-1]["positions"] if collected else []
     state["open_orders"] = []
