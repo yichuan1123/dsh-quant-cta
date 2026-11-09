@@ -19,6 +19,8 @@ import time
 from .data import load_bundle
 from .engine import Backtester
 from .metrics import compute_metrics
+from .model import model_path
+from .model import save_state as save_model_state
 from .specs import resolve_pool
 from .types import EngineConfig
 
@@ -67,10 +69,21 @@ def _cfg_from_state(state) -> EngineConfig:
         max_symbol_risk=c["max_symbol_risk"],
         stop_atr=c.get("stop_atr", 0.0),
         sleeves=tuple(c["sleeves"]),
+        sizing=c.get("sizing", "vol_parity"),
+        model_method=c.get("model_method", "risk_parity"),
+        model_lookback=c.get("model_lookback", 250),
+        model_rebalance=c.get("model_rebalance", 20),
+        model_max_weight=c.get("model_max_weight", 0.15),
+        model_sector_cap=c.get("model_sector_cap", 0.35),
+        model_min_bars=c.get("model_min_bars", 250),
+        model_exclude_sectors=tuple(c.get("model_exclude_sectors") or ()),
     )
 
 
-def _init_state(codes, capital, vol, sleeves, start_date, slip, leverage, dd_halt, symbol_risk, atr_period, stop_atr):
+def _init_state(codes, capital, vol, sleeves, start_date, slip, leverage, dd_halt, symbol_risk,
+                atr_period, stop_atr, sizing="vol_parity", model_method="risk_parity",
+                model_lookback=250, model_rebalance=20, model_max_weight=0.15,
+                model_sector_cap=0.35, model_min_bars=250, model_exclude_sectors=()):
     return {
         "version": STATE_VERSION,
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
@@ -86,6 +99,14 @@ def _init_state(codes, capital, vol, sleeves, start_date, slip, leverage, dd_hal
             "max_drawdown_halt": float(dd_halt),
             "max_symbol_risk": float(symbol_risk),
             "stop_atr": float(stop_atr),
+            "sizing": sizing,
+            "model_method": model_method,
+            "model_lookback": int(model_lookback),
+            "model_rebalance": int(model_rebalance),
+            "model_max_weight": float(model_max_weight),
+            "model_sector_cap": float(model_sector_cap),
+            "model_min_bars": int(model_min_bars),
+            "model_exclude_sectors": list(model_exclude_sectors or ()),
             "sleeves": [{"name": s["name"], "strategy": s["strategy"], "alloc": s["alloc"], "kwargs": s.get("kwargs", {})}
                         for s in sleeves],
         },
@@ -169,6 +190,24 @@ def step(live: bool = False, quiet: bool = False):
                 "for_date": "next-trading-day",
                 "targets": [{"symbol": t.symbol, "direction": t.direction} for t in s.pending["targets"]],
             })
+    # 实时更新：把这次推进里最后一次重估的权重落盘（state/model.json），
+    # 面板与 qcta_sim status 都读它。
+    if result.model_history:
+        latest_model = result.model_history[-1]
+        save_model_state(model_path(REPO_ROOT), latest_model)
+        state["model"] = {
+            "version": latest_model.get("version"),
+            "asof": latest_model.get("asof"),
+            "updated_at": latest_model.get("updated_at"),
+            "method": latest_model.get("method"),
+            "weights": latest_model.get("weights", {}),
+            "diagnostics": {
+                k: v for k, v in (latest_model.get("diagnostics") or {}).items()
+                if k in ("n", "effective_n", "ann_vol_pct", "hhi", "sector_totals_pct", "observations")
+            },
+            "rebalances": len(result.model_history),
+        }
+
     state["updated_at"] = dt.datetime.now().isoformat(timespec="seconds")
     save_state(state)
 
@@ -198,6 +237,14 @@ def cmd_paper(args):
             symbol_risk=args.symbol_risk,
             atr_period=args.atr,
             stop_atr=args.stop_atr,
+            sizing=getattr(args, "sizing", "vol_parity"),
+            model_method=getattr(args, "method", "risk_parity"),
+            model_lookback=getattr(args, "lookback", 250),
+            model_rebalance=getattr(args, "model_rebalance", 20),
+            model_max_weight=getattr(args, "max_weight", 0.15),
+            model_sector_cap=getattr(args, "sector_cap", 0.35),
+            model_min_bars=getattr(args, "model_min_bars", 250),
+            model_exclude_sectors=tuple(x for x in (getattr(args, "exclude_sectors", "") or "").split(",") if x),
         )
         save_state(state)
         payload = {"ok": True, "action": "init", "codes": codes, "state_path": STATE_PATH,

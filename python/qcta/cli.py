@@ -241,6 +241,62 @@ def cmd_data(args):
                                       for r in p["synced"]))
 
 
+# ───────────────────────────── optimize ─────────────────────────────
+
+def cmd_optimize(args):
+    """只解配比、不跑回测：适合先看一眼「全盘该给谁多少风险预算」。"""
+    from .model import RollingModel
+
+    codes = resolve_pool(args.pool)
+    bundle = load_bundle(codes, args.start, args.end or "", prefer_live=args.live, refresh=args.refresh)
+    missing = [c for c, bars in bundle.bars_by_code.items() if not bars]
+    if missing:
+        return _emit({"ok": False, "error": "以下品种没有数据：%s" % ", ".join(missing)}, args.json,
+                     lambda p: p["error"])
+    model = RollingModel(
+        method=args.method,
+        lookback=args.lookback,
+        min_bars=args.min_bars,
+        max_weight=args.max_weight,
+        sector_cap=args.sector_cap,
+        exclude_sectors=tuple(x for x in (args.exclude_sectors or "").split(",") if x),
+    )
+    state = model.update(bundle.bars_by_code, asof=args.asof or "")
+    payload = {
+        "ok": True,
+        "data_source": bundle.source,
+        "notes": bundle.notes,
+        "method": state["method"],
+        "asof": state["asof"],
+        "weights": state["weights"],
+        "diagnostics": state["diagnostics"],
+    }
+    ranked = sorted(state["weights"].items(), key=lambda kv: -kv[1])
+
+    def text(p):
+        d = p["diagnostics"]
+        lines = [
+            "最优配比（%s，数据来源 %s）" % (p["method"], p["data_source"]),
+            "品种数 %s / 观测 %s 天 / 组合年化波动 %.2f%% / 有效品种数 %.1f" % (
+                d.get("n"), d.get("observations"), d.get("ann_vol_pct", 0), d.get("effective_n", 0)),
+            "",
+            "品种  权重    风险贡献",
+        ]
+        rc = d.get("risk_contributions", {})
+        for code, w in ranked:
+            lines.append("  %-4s %6.2f%%  %6.2f%%" % (code, w * 100, rc.get(code, 0)))
+        if d.get("sector_totals_pct"):
+            lines.append("")
+            lines.append("板块：" + "  ".join("%s %.1f%%" % (k, v) for k, v in d["sector_totals_pct"].items()))
+        dropped = d.get("universe", {}).get("dropped", [])
+        if dropped:
+            lines.append("剔除 %d 个：" % len(dropped) + ", ".join(
+                "%s(%s)" % (x["code"], x["reason"]) for x in dropped[:10]))
+        return "\n".join(lines)
+
+    return _emit(payload, args.json, text)
+
+
 # ───────────────────────────── backtest ─────────────────────────────
 
 def _config_from_args(args):
@@ -256,6 +312,14 @@ def _config_from_args(args):
         max_symbol_risk=args.symbol_risk,
         stop_atr=args.stop_atr,
         sleeves=tuple(parse_sleeves(args.sleeves)),
+        sizing=getattr(args, "sizing", "vol_parity"),
+        model_method=getattr(args, "method", "risk_parity"),
+        model_lookback=getattr(args, "lookback", 250),
+        model_rebalance=getattr(args, "model_rebalance", 20),
+        model_max_weight=getattr(args, "max_weight", 0.15),
+        model_sector_cap=getattr(args, "sector_cap", 0.35),
+        model_min_bars=getattr(args, "model_min_bars", 250),
+        model_exclude_sectors=tuple(x for x in (getattr(args, "exclude_sectors", "") or "").split(",") if x),
     )
 
 
@@ -419,9 +483,36 @@ def build_parser():
     b.add_argument("--sleeves", default="", help="trend:0.6,xsec:0.4")
     b.add_argument("--live", action="store_true")
     b.add_argument("--refresh", action="store_true")
+    b.add_argument("--sizing", choices=["vol_parity", "optimizer"], default="vol_parity",
+                   help="vol_parity=用策略给的权重；optimizer=按最优配比分配风险")
+    b.add_argument("--method", default="risk_parity",
+                   choices=["equal_weight", "inverse_vol", "risk_parity", "min_variance", "mean_variance"])
+    b.add_argument("--lookback", type=int, default=250)
+    b.add_argument("--model-rebalance", dest="model_rebalance", type=int, default=20)
+    b.add_argument("--max-weight", dest="max_weight", type=float, default=0.15)
+    b.add_argument("--sector-cap", dest="sector_cap", type=float, default=0.35)
+    b.add_argument("--model-min-bars", dest="model_min_bars", type=int, default=250)
+    b.add_argument("--exclude-sectors", dest="exclude_sectors", default="")
     b.add_argument("--name", default="")
     b.add_argument("--json", action="store_true")
     b.set_defaults(func=cmd_backtest)
+
+    op = sub.add_parser("optimize", help="解最优配比（不跑回测）")
+    op.add_argument("--pool", default="all")
+    op.add_argument("--method", default="risk_parity",
+                    choices=["equal_weight", "inverse_vol", "risk_parity", "min_variance", "mean_variance"])
+    op.add_argument("--lookback", type=int, default=250)
+    op.add_argument("--min-bars", dest="min_bars", type=int, default=250)
+    op.add_argument("--max-weight", dest="max_weight", type=float, default=0.15)
+    op.add_argument("--sector-cap", dest="sector_cap", type=float, default=0.35)
+    op.add_argument("--exclude-sectors", dest="exclude_sectors", default="")
+    op.add_argument("--start", default="2016-01-01")
+    op.add_argument("--end", default="")
+    op.add_argument("--asof", default="", help="用截至哪一天的数据（空=全部）")
+    op.add_argument("--live", action="store_true")
+    op.add_argument("--refresh", action="store_true")
+    op.add_argument("--json", action="store_true")
+    op.set_defaults(func=cmd_optimize)
 
     r = sub.add_parser("runs", help="列出历史回测")
     r.add_argument("--json", action="store_true")
@@ -444,6 +535,15 @@ def build_parser():
     pc.add_argument("--live", action="store_true")
     pc.add_argument("--max-steps", type=int, default=0)
     pc.add_argument("--start", default="2019-01-01")
+    pc.add_argument("--sizing", choices=["vol_parity", "optimizer"], default="optimizer")
+    pc.add_argument("--method", default="risk_parity",
+                    choices=["equal_weight", "inverse_vol", "risk_parity", "min_variance", "mean_variance"])
+    pc.add_argument("--lookback", type=int, default=250)
+    pc.add_argument("--model-rebalance", dest="model_rebalance", type=int, default=20)
+    pc.add_argument("--max-weight", dest="max_weight", type=float, default=0.15)
+    pc.add_argument("--sector-cap", dest="sector_cap", type=float, default=0.35)
+    pc.add_argument("--model-min-bars", dest="model_min_bars", type=int, default=250)
+    pc.add_argument("--exclude-sectors", dest="exclude_sectors", default="")
     pc.add_argument("--slip", type=float, default=1.0)
     pc.add_argument("--leverage", type=float, default=1.0)
     pc.add_argument("--dd-halt", dest="dd_halt", type=float, default=0.20)

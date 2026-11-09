@@ -2,6 +2,28 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] - 2026-11-09
+
+### 新增
+
+- **全盘品种池**：`--pool all` 用全部 28 个品种；按历史长度/板块自动筛选，剔除原因可查
+- **最优配比求解器** `qcta/optimizer.py`：等权 / 波动率倒数 / ERC 风险平价 / 最小方差 / 均值方差，
+  带 Ledoit-Wolf 恒等目标收缩、单品种与板块上限。纯标准库，28 品种求解瞬间收敛
+- **`qcta optimize` 子命令**：先看"全盘该给谁多少风险预算"，不跑回测
+- **滚动模型** `qcta/model.py`：调仓日 walk-forward 重估权重（`--sizing optimizer`），
+  状态落 `state/model.json`（version / asof / 最近 20 次历史，可看权重漂移）
+- **DSH 接入模拟**：`qcta_sim` 工具 + `GET/POST /dsh-quant-cta/api/sim` + 宿主定时器
+  （默认 300 秒推进一次 paper 账本），状态回流工具与面板
+- **面板新增「最优配比与模拟调度」卡片**：权重表、风险贡献、一键推进与自动推进
+- 报告新增「最优配比（滚动重估）」章节：方法、重估次数、有效品种数、权重表、板块权重、漂移
+- 测试 43 → 78（配比求解器 14 条、滚动模型与引擎接入 14 条）
+
+### 变更
+
+- `EngineConfig` 新增 `sizing / model_*` 系列字段；paper 会话默认走 optimizer
+- 权重语义明确区分「None（没有模型）→ 用策略权重」与「{}（没有可用品种）→ 不建仓」，
+  避免模型失效时静默回退满仓
+
 ## [0.3.1] - 2026-11-09
 
 ### 修复

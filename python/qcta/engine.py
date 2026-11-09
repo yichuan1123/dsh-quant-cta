@@ -13,6 +13,7 @@
 
 from .account import Account
 from .indicators import atr
+from .model import RollingModel
 from .sizing import cap_by_leverage, daily_risk_budget, lots_for_risk, normalize_weights
 from .specs import get_spec
 from .strategies import build as build_strategy
@@ -36,7 +37,7 @@ class Sleeve:
 
 
 class BacktestResult:
-    def __init__(self, cfg, bundle, sleeves, dates, aggregate):
+    def __init__(self, cfg, bundle, sleeves, dates, aggregate, model_history=None):
         self.cfg = cfg
         self.bundle = bundle
         self.sleeves = sleeves
@@ -44,6 +45,7 @@ class BacktestResult:
         self.aggregate = aggregate      # list[DailyRecord]
         self.metrics = {}
         self.costs = {}
+        self.model_history = list(model_history or [])
 
     @property
     def fills(self):
@@ -75,6 +77,20 @@ class Backtester:
                 bars[i].date: series[i] for i in range(len(bars)) if series[i] is not None
             }
         self.all_dates = self._dates_in_range(bundle.dates)
+        # 最优配比：sizing='optimizer' 时每个调仓日重估权重（walk-forward），
+        # 模型只决定「风险预算怎么分」，不决定方向。
+        self.model = None
+        self._weights = {}
+        self._model_history = []
+        if getattr(cfg, "sizing", "vol_parity") == "optimizer":
+            self.model = RollingModel(
+                method=cfg.model_method,
+                lookback=cfg.model_lookback,
+                min_bars=cfg.model_min_bars,
+                max_weight=cfg.model_max_weight,
+                sector_cap=cfg.model_sector_cap,
+                exclude_sectors=getattr(cfg, "model_exclude_sectors", ()),
+            )
 
     def _dates_in_range(self, dates):
         lo = self.cfg.start_date or "0000-00-00"
@@ -127,7 +143,15 @@ class Backtester:
         halted = False
         prev_date = None
 
-        for date in self.all_dates:
+        for di, date in enumerate(self.all_dates):
+            # 0) 调仓日重估最优配比（只用到 asof=date 的数据，防未来函数）
+            if self.model is not None and (di % max(1, self.cfg.model_rebalance) == 0 or not self._weights):
+                state = self.model.update(self.bundle.bars_by_code, asof=date)
+                self._weights = state.get("weights") or {}
+                self._model_history.append(state)
+                if len(self._model_history) > 400:
+                    del self._model_history[:100]
+
             # 1) 开盘：执行上一交易日收盘生成的目标簿
             for s in sleeves:
                 if s.pending is not None:
@@ -204,7 +228,8 @@ class Backtester:
                         s.account.curve[-1].net_exposure = 0.0
                         s.account.curve[-1].margin = 0.0
 
-        return BacktestResult(self.cfg, self.bundle, sleeves, self.all_dates, aggregate)
+        return BacktestResult(self.cfg, self.bundle, sleeves, self.all_dates, aggregate,
+                              model_history=self._model_history)
 
     def decide(self, sleeve: Sleeve, date: str):
         """收盘后决策：只在策略给出信号的日期重建目标簿。"""
@@ -219,6 +244,10 @@ class Backtester:
             "atr": {c: self.atr_by_code.get(c, {}).get(date) for c in self.bundle.bars_by_code},
             "equity": sleeve.account.equity(),
             "from": date,
+            # 注意：optimizer 模式下即使权重为空也要原样传下去（表示「没有可用品种，别建仓」），
+            # 不能被当成「没有模型」而回退到策略权重。
+            "weights": dict(self._weights) if self.model is not None else None,
+            "sizing": self.cfg.sizing,
         }
         sleeve.pending_age = 0
         return True
@@ -237,12 +266,22 @@ class Backtester:
         atr_map = spec_snapshot["atr"]
         if equity <= 0:
             return {}
-        weights = normalize_weights([t.weight for t in targets])
+        # 权重来源（注意 None 与 {} 语义不同）：
+        #   optimizer 模式：weights 即使为 {} 也表示「没有可用风险预算 → 不建仓」，
+        #                   绝不能回退到策略权重（否则模型失效时偷偷满仓）。
+        #   其它模式：优先显式 risk_weights，否则用策略自己给的权重。
+        if spec_snapshot.get("sizing") == "optimizer":
+            override = spec_snapshot.get("weights")
+            raw = [float(override.get(t.symbol, 0.0)) if override is not None else 0.0 for t in targets]
+        else:
+            override = spec_snapshot.get("weights") or self.cfg.risk_weights
+            raw = [float(override.get(t.symbol, 0.0)) if override is not None else float(t.weight) for t in targets]
+        weights = normalize_weights(raw)
         budget_total = daily_risk_budget(equity, self.cfg.target_vol)
         desired = {}
         for t, w in zip(targets, weights):
             spec = self.specs.get(t.symbol)
-            if spec is None or t.direction == 0:
+            if spec is None or t.direction == 0 or w <= 0:
                 continue
             a = atr_map.get(t.symbol) or 0.0
             lots = lots_for_risk(spec, equity, a, budget_total * w, self.cfg.max_symbol_risk)

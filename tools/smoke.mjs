@@ -66,8 +66,8 @@ apply(fakeCtx(), { pythonPath: process.env.QCTA_PYTHON || undefined })
 
 /* ── 1. 注册面 ── */
 assert(name === 'dsh-quant-cta', '插件名正确')
-assert(tools.size === 5, '注册 5 个工具，实际 ' + tools.size)
-for (const t of ['qcta_doctor', 'qcta_data', 'qcta_backtest', 'qcta_report', 'qcta_paper']) {
+assert(tools.size === 6, '注册 6 个工具，实际 ' + tools.size)
+for (const t of ['qcta_doctor', 'qcta_data', 'qcta_backtest', 'qcta_report', 'qcta_paper', 'qcta_sim']) {
   assert(tools.has(t), '工具存在：' + t)
 }
 for (const [n, def] of tools) {
@@ -79,6 +79,7 @@ assert(routes.has('/dsh-quant-cta/api/overview'), '路由 overview 已注册')
 assert(routes.has('/dsh-quant-cta/api/report'), '路由 report 已注册')
 assert(routes.has('/dsh-quant-cta/api/credentials'), '路由 credentials 已注册')
 assert(routes.has('/dsh-quant-cta/api/credentials/test'), '路由 credentials/test 已注册')
+assert(routes.has('/dsh-quant-cta/api/sim'), '路由 sim 已注册')
 assert(routes.has('/dsh-quant-cta/panel'), '路由 panel 已注册')
 assert(promptSections.includes('quant-cta'), '注册了系统提示片段')
 
@@ -137,6 +138,17 @@ try {
 
   const cleared = await getJson('/dsh-quant-cta/api/credentials', { method: 'DELETE' })
   assert(cleared.json !== null && cleared.json.configured === false, 'DELETE 后回到未配置')
+
+  const sim = await getJson('/dsh-quant-cta/api/sim')
+  assert(sim.status === 200 && sim.json !== null && typeof sim.json.running === 'boolean', 'GET sim 返回调度状态')
+  assert('paper' in sim.json && 'model' in sim.json, 'sim 状态里带 paper 与 model')
+
+  const simStop = await getJson('/dsh-quant-cta/api/sim', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'stop' }),
+  })
+  assert(simStop.json !== null && simStop.json.ok === true && simStop.json.status.running === false, 'POST sim stop 生效')
 } finally {
   server.close()
   if (existsSync(CRED_PATH)) rmSync(CRED_PATH)
