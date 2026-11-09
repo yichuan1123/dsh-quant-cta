@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     var React = require('react');
     var h = React.createElement;
 
-    var PLUGIN_VERSION = '0.10.1';
+    var PLUGIN_VERSION = '0.10.2';
     var TAB_ID = 'dsh-quant-cta';
     var TAB_KIND = 'quantcta';
     var PANEL_URL = '/dsh-quant-cta/panel';
