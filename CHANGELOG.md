@@ -2,6 +2,22 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-11-09
+
+### 新增
+
+- **面板「数据源账号」卡片**：填快期账号密码 → 保存并真连一次天勤验证（回显 KQ.m@SHFE.rb 最新价）。
+  密码只写本机 credentials.json（gitignore 覆盖），页面永不回显，保存后输入框清空
+- qcta auth 子命令：status / login / test / logout。**密码只从 stdin 读**，不进 argv、不进进程列表
+- HTTP 路由：GET/POST/DELETE /dsh-quant-cta/api/credentials、POST /dsh-quant-cta/api/credentials/test（只测不存）
+- 凭据文件位置支持 QCTA_CRED_PATH 覆盖（测试与多账户场景）
+- 冒烟测试升级为**真 HTTP 服务**：把注册的路由逐个打一遍，并断言「响应体里既没有明文密码、也没有完整账号」
+
+### 变更
+
+- 账号配置的推荐路径从「环境变量/手写 json」改为「面板表单」，命令行方式保留
+- 单测 35 → 43（新增 8 条凭据存储与脱敏测试）
+
 ## [0.1.1] - 2026-11-09
 
 ### 修复

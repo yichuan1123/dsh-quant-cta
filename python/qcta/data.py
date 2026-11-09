@@ -12,6 +12,7 @@
 import csv
 import datetime as _dt
 import hashlib
+import json
 import math
 import os
 import random
@@ -85,6 +86,10 @@ def slice_bars(bars, start: str = "", end: str = ""):
 # ───────────────────────────── 凭据 ─────────────────────────────
 
 def credentials_path() -> str:
+    """凭据文件位置。QCTA_CRED_PATH 可覆盖（测试与多账户场景用）。"""
+    override = os.environ.get("QCTA_CRED_PATH")
+    if override:
+        return os.path.abspath(override)
     return os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "credentials.json"))
 
 
@@ -97,8 +102,6 @@ def load_credentials():
     path = credentials_path()
     if os.path.exists(path):
         try:
-            import json
-
             with open(path, "r", encoding="utf-8") as fh:
                 obj = json.load(fh)
             u = obj.get("tq_user") or obj.get("user")
@@ -108,6 +111,132 @@ def load_credentials():
         except Exception:
             return None
     return None
+
+
+def mask_user(user: str) -> str:
+    """脱敏：只露前 3 位与后 2 位。任何对外输出都必须走这里。"""
+    u = str(user or "")
+    if len(u) <= 5:
+        return "*" * len(u)
+    return u[:3] + "*" * (len(u) - 5) + u[-2:]
+
+
+def credentials_status() -> dict:
+    """凭据状态。**绝不返回密码**，只返回脱敏账号与来源。"""
+    env_user = os.environ.get("QCTA_TQ_USER") or os.environ.get("TQ_USER")
+    env_pass = os.environ.get("QCTA_TQ_PASS") or os.environ.get("TQ_PASS")
+    path = credentials_path()
+    file_exists = os.path.exists(path)
+    file_user = None
+    if file_exists:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                obj = json.load(fh)
+            file_user = obj.get("tq_user") or obj.get("user")
+        except Exception:
+            file_user = None
+
+    if env_user and env_pass:
+        source, user = "env", env_user
+    elif file_user:
+        source, user = "file", file_user
+    else:
+        source, user = None, None
+
+    return {
+        "configured": bool(source),
+        "source": source,
+        "masked_user": mask_user(user) if user else "",
+        "path": path,
+        "file_exists": file_exists,
+        "env_present": bool(env_user and env_pass),
+    }
+
+
+def save_credentials(user: str, password: str) -> dict:
+    """把账号密码写到本机文件（gitignore 覆盖）。密码不落日志、不回显。"""
+    u = str(user or "").strip()
+    p = str(password or "")
+    if not u or not p:
+        raise ValueError("账号和密码都不能为空")
+    path = credentials_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = {
+        "tq_user": u,
+        "tq_pass": p,
+        "saved_at": _dt.datetime.now().isoformat(timespec="seconds"),
+    }
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False)
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
+    os.replace(tmp, path)
+    return credentials_status()
+
+
+def clear_credentials() -> dict:
+    path = credentials_path()
+    removed = False
+    if os.path.exists(path):
+        os.remove(path)
+        removed = True
+    status = credentials_status()
+    status["removed"] = removed
+    return status
+
+
+def probe_credentials(user: str = None, password: str = None, timeout_s: int = 20) -> dict:
+    """真连一次天勤，验证账号密码可用。不保存任何东西。"""
+    if user is None or password is None:
+        cred = load_credentials()
+        if not cred:
+            return {"ok": False, "error": "还没有保存账号密码"}
+        user, password = cred
+    try:
+        from tqsdk import TqApi, TqAuth  # type: ignore
+    except Exception as exc:
+        return {"ok": False, "error": "未安装 tqsdk：" + str(exc)}
+    import time as _time
+
+    api = None
+    try:
+        api = TqApi(auth=TqAuth(user, password))
+        quote = api.get_quote("KQ.m@SHFE.rb")
+        deadline = _time.time() + timeout_s
+        last = None
+        while _time.time() < deadline:
+            api.wait_update()
+            try:
+                v = float(quote.last_price)
+            except Exception:
+                v = None
+            if v is not None and v > 0:
+                last = v
+                break
+        if last is None:
+            return {"ok": False, "error": "连上了但 %d 秒内没拿到行情，可能是账号无权限或网络受限" % timeout_s}
+        return {
+            "ok": True,
+            "symbol": "KQ.m@SHFE.rb",
+            "last_price": last,
+            "masked_user": mask_user(user),
+            "checked_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        }
+    except Exception as exc:
+        msg = str(exc)
+        hint = ""
+        if "auth" in msg.lower() or "password" in msg.lower() or "登录" in msg:
+            hint = "（账号或密码不对）"
+        return {"ok": False, "error": msg[:400] + hint}
+    finally:
+        if api is not None:
+            try:
+                api.close()
+            except Exception:
+                pass
 
 
 # ───────────────────────────── 交易日历（合成数据用） ─────────────────────────────

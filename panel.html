@@ -41,6 +41,12 @@
   .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
   .warnbox { border: 1px solid #4a3d1a; background: #221c0f; color: var(--warn); padding: 10px 14px;
              border-radius: 10px; font-size: 13px; margin-bottom: 18px; }
+  .formrow { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .inp { background: #12151b; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+         padding: 8px 12px; font-size: 13px; min-width: 200px; outline: none; }
+  .inp:focus { border-color: #3a4a5e; }
+  .ok-text { color: var(--up); } .bad-text { color: var(--down); }
+  code { background: #12151b; border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -68,6 +74,23 @@
     <h2>品种归因</h2>
     <div id="symbols"></div>
   </section>
+  <section>
+    <h2>数据源账号（快期 / TqSdk）</h2>
+    <div class="card">
+      <div id="credstatus" class="note" style="margin:0 0 12px">读取中…</div>
+      <div class="formrow">
+        <input id="creduser" class="inp" placeholder="快期账号（手机号）" autocomplete="username" spellcheck="false">
+        <input id="credpass" class="inp" type="password" placeholder="密码" autocomplete="current-password">
+        <button id="credsave">保存并测试</button>
+        <button id="credtest">仅测试</button>
+        <button id="credclear">清除</button>
+      </div>
+      <div id="credmsg" class="note"></div>
+      <div class="note">密码只写入本机 credentials.json（已在 .gitignore 里），页面永不回显，保存后输入框自动清空。
+        保存成功后即可跑 <code>qcta_data action="sync" live=true</code> 拉真实行情。</div>
+    </div>
+  </section>
+
   <section>
     <h2>模拟盘</h2>
     <div id="paper"></div>
@@ -298,6 +321,7 @@
       c.appendChild(el('div', 'empty', '还没有回测。让 agent 跑 qcta_backtest，或调 /dsh-quant-cta/api/overview 确认引擎可用。'));
     }
     renderPaper(ov.paper);
+    loadCredentials();
   }
 
   function load() {
@@ -309,6 +333,100 @@
         document.getElementById('warn').appendChild(el('div', 'warnbox', '读取失败：' + String(e)));
       });
   }
+
+  /* ---------- 数据源账号 ---------- */
+
+  function credMsg(text, cls) {
+    var host = document.getElementById('credmsg');
+    host.textContent = text || '';
+    host.className = 'note' + (cls ? ' ' + cls : '');
+  }
+
+  function renderCredStatus(d) {
+    var host = document.getElementById('credstatus');
+    if (!d || d.ok === false) {
+      host.innerHTML = '';
+      host.appendChild(el('span', 'bad-text', '读取凭据状态失败：' + ((d && d.error) || '未知错误')));
+      return;
+    }
+    host.innerHTML = '';
+    if (d.configured) {
+      host.appendChild(el('span', 'ok-text', '● 已配置 ' + d.masked_user));
+      host.appendChild(el('span', null, '　来源：' + (d.source === 'env' ? '环境变量' : '本机文件') +
+        '　文件：' + d.path));
+    } else {
+      host.appendChild(el('span', 'bad-text', '○ 未配置 —— 目前回测只能用合成数据'));
+    }
+  }
+
+  function loadCredentials() {
+    fetch('/dsh-quant-cta/api/credentials', { cache: 'no-store' })
+      .then(function (r) { return r.json() })
+      .then(renderCredStatus)
+      .catch(function (e) { renderCredStatus({ ok: false, error: String(e) }) });
+  }
+
+  function credBusy(flag) {
+    ['credsave', 'credtest', 'credclear'].forEach(function (id) {
+      var b = document.getElementById(id);
+      if (b) b.disabled = flag;
+    });
+  }
+
+  function postCred(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    }).then(function (r) { return r.json() });
+  }
+
+  document.getElementById('credsave').addEventListener('click', function () {
+    var user = document.getElementById('creduser').value.trim();
+    var pass = document.getElementById('credpass').value;
+    if (!user || !pass) { credMsg('账号和密码都要填。', 'bad-text'); return; }
+    credBusy(true);
+    credMsg('正在保存并测试连通性（最多 90 秒）…');
+    postCred('/dsh-quant-cta/api/credentials', { user: user, password: pass, verify: true })
+      .then(function (d) {
+        credBusy(false);
+        if (!d.ok) { credMsg('保存失败：' + (d.error || '未知错误'), 'bad-text'); return }
+        document.getElementById('creduser').value = '';
+        document.getElementById('credpass').value = '';
+        renderCredStatus(d.status);
+        var p = d.probe || {};
+        if (p.ok) {
+          credMsg('已保存并验证通过：' + p.symbol + ' 最新价 ' + p.last_price + '（' + p.checked_at + '）', 'ok-text');
+        } else {
+          credMsg('账号已保存，但连通性测试未通过：' + (p.error || '未知原因') +
+            ' —— 账号可能不对，或是网络受限；可以点「仅测试」重试。', 'bad-text');
+        }
+      })
+      .catch(function (e) { credBusy(false); credMsg('请求失败：' + String(e), 'bad-text') });
+  });
+
+  document.getElementById('credtest').addEventListener('click', function () {
+    var user = document.getElementById('creduser').value.trim();
+    var pass = document.getElementById('credpass').value;
+    credBusy(true);
+    credMsg('正在测试连通性（最多 90 秒）…');
+    postCred('/dsh-quant-cta/api/credentials/test', { user: user, password: pass })
+      .then(function (d) {
+        credBusy(false);
+        if (d.ok) credMsg('连通 OK：' + d.symbol + ' 最新价 ' + d.last_price, 'ok-text');
+        else credMsg('连通失败：' + (d.error || '未知原因'), 'bad-text');
+      })
+      .catch(function (e) { credBusy(false); credMsg('请求失败：' + String(e), 'bad-text') });
+  });
+
+  document.getElementById('credclear').addEventListener('click', function () {
+    if (!confirm('确定删除本机保存的快期账号密码？')) return;
+    credBusy(true);
+    fetch('/dsh-quant-cta/api/credentials', { method: 'DELETE' })
+      .then(function (r) { return r.json() })
+      .then(function (d) { credBusy(false); renderCredStatus(d); credMsg('已清除本机凭据。'); })
+      .catch(function (e) { credBusy(false); credMsg('清除失败：' + String(e), 'bad-text') });
+  });
 
   document.getElementById('refresh').addEventListener('click', load);
   document.getElementById('runs').addEventListener('change', function (ev) {

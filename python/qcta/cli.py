@@ -11,8 +11,9 @@ import os
 import sys
 
 from . import __version__
-from .data import (TqSdkError, cache_dir, credentials_path, fetch_tqsdk,
-                   load_bundle, load_cache, load_credentials, save_cache)
+from .data import (TqSdkError, cache_dir, clear_credentials, credentials_path,
+                   credentials_status, fetch_tqsdk, load_bundle, load_cache,
+                   load_credentials, probe_credentials, save_credentials, save_cache)
 from .engine import Backtester
 from .metrics import compute_metrics
 from .report import render_markdown, write_reports
@@ -113,6 +114,74 @@ def cmd_doctor(args):
     return _emit(payload, args.json, lambda p: "\n".join(
         ["%s %s  %s" % ("OK " if c["ok"] else "MISS", c["name"], c["detail"]) for c in p["checks"]]
         + ["", "version %s" % p["version"]]))
+
+
+# ───────────────────────────── auth ─────────────────────────────
+
+def _read_stdin_json():
+    raw = sys.stdin.read()
+    if not raw.strip():
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def cmd_auth(args):
+    """账号密码管理。
+
+    密码只从 stdin 读（不进 argv，不会出现在进程列表里），
+    输出里永远只有脱敏账号，绝不回显密码。
+    """
+    action = args.action
+
+    if action == "status":
+        payload = credentials_status()
+        return _emit(payload, args.json, lambda p: "\n".join([
+            "账号凭据：%s" % ("已配置（%s）" % p["masked_user"] if p["configured"] else "未配置"),
+            "来源：%s" % (p["source"] or "—"),
+            "文件：%s（%s）" % (p["path"], "存在" if p["file_exists"] else "不存在"),
+            "环境变量：%s" % ("已设置" if p["env_present"] else "未设置"),
+        ]))
+
+    if action == "login":
+        body = _read_stdin_json()
+        user = body.get("user") or args.user
+        password = body.get("password") or ""
+        if not user or not password:
+            return _emit({"ok": False, "error": "缺少账号或密码"}, args.json, lambda p: p["error"])
+        try:
+            status = save_credentials(user, password)
+        except ValueError as exc:
+            return _emit({"ok": False, "error": str(exc)}, args.json, lambda p: p["error"])
+        payload = {"ok": True, "saved": True, "status": status}
+        if args.verify:
+            payload["probe"] = probe_credentials(user, password, timeout_s=args.timeout)
+            payload["ok"] = True  # 保存成功即 ok；连通性单独看 probe
+        return _emit(payload, args.json, lambda p: "\n".join([
+            "已保存账号 %s" % p["status"]["masked_user"],
+            "文件：%s" % p["status"]["path"],
+            ("连通性：%s" % ("OK，%s 最新价 %s" % (p["probe"].get("symbol"), p["probe"].get("last_price"))
+                            if p.get("probe", {}).get("ok") else "失败 —— %s" % p.get("probe", {}).get("error", "")))
+            if "probe" in p else "提示：加 --verify 可以顺便验证连通性",
+        ]))
+
+    if action == "test":
+        body = _read_stdin_json()
+        user = body.get("user")
+        password = body.get("password")
+        res = probe_credentials(user, password, timeout_s=args.timeout)
+        return _emit(res, args.json, lambda p: ("连通 OK：%s 最新价 %s" % (p.get("symbol"), p.get("last_price")))
+                                              if p.get("ok") else ("连通失败：%s" % p.get("error")))
+
+    if action == "logout":
+        payload = clear_credentials()
+        return _emit({"ok": True, **payload}, args.json,
+                     lambda p: "已删除本机凭据文件" if p.get("removed") else "本来就没有凭据文件")
+
+    sys.stdout.write("未知 action：%s\n" % action)
+    return 2
 
 
 # ───────────────────────────── specs ─────────────────────────────
@@ -314,6 +383,15 @@ def build_parser():
     d = sub.add_parser("doctor", help="环境自检")
     d.add_argument("--json", action="store_true")
     d.set_defaults(func=cmd_doctor)
+
+    au = sub.add_parser("auth", help="快期账号管理（密码只从 stdin 读）")
+    au.add_argument("action", choices=["status", "login", "test", "logout"])
+    au.add_argument("--stdin", action="store_true", help="从 stdin 读 JSON（密码不进 argv）")
+    au.add_argument("--user", default="", help="账号（也可从 stdin JSON 给）")
+    au.add_argument("--verify", action="store_true", help="保存后顺便验证连通性")
+    au.add_argument("--timeout", type=int, default=20)
+    au.add_argument("--json", action="store_true")
+    au.set_defaults(func=cmd_auth)
 
     s = sub.add_parser("specs", help="列出合约规格")
     s.add_argument("--json", action="store_true")

@@ -59,18 +59,21 @@ python -m venv .venv
 
 ### 3. 配天勤账号（可选，但强烈建议）
 
-免费注册快期账号后：
+**推荐：在面板里填** —— 打开 `/dsh-quant-cta/panel`，找到「数据源账号」卡片，
+填快期账号（手机号）与密码，点「保存并测试」，它会立刻真连一次天勤并回显
+`KQ.m@SHFE.rb` 的最新价。密码只写到本机 `credentials.json`（已 gitignore），
+页面永不回显，保存后输入框自动清空。
+
+命令行等价物（密码走 stdin，不进 argv）：
 
 ```bash
-set QCTA_TQ_USER=你的账号
-set QCTA_TQ_PASS=你的密码
+echo '{"user":"手机号","password":"密码"}' | python -m qcta auth login --stdin --verify
+python -m qcta auth status     # 只看脱敏账号
+python -m qcta auth logout     # 删除本机凭据
 ```
 
-或写 `credentials.json`（已在 .gitignore 里）：
-
-```json
-{"tq_user": "手机号", "tq_pass": "密码"}
-```
+也支持环境变量 `QCTA_TQ_USER` / `QCTA_TQ_PASS`（优先级高于文件），
+或直接写 `credentials.json`。凭据文件位置可用 `QCTA_CRED_PATH` 覆盖。
 
 没有凭据时引擎仍能跑，但只用合成数据，报告顶部有醒目标注。
 
@@ -87,6 +90,18 @@ qcta_paper  action="init"; qcta_paper action="step"
 ```
 
 面板：`http://127.0.0.1:58080/dsh-quant-cta/panel`
+
+面板背后的只读/管理路由（全部同源，无鉴权，只在本机回环地址上可用）：
+
+| 路由 | 作用 |
+|---|---|
+| `GET /dsh-quant-cta/api/overview` | 回测清单 + 最近一次报告 + 模拟盘状态 |
+| `GET /dsh-quant-cta/api/report?run=<id>` | 单次回测的完整 JSON |
+| `GET /dsh-quant-cta/api/credentials` | 凭据状态（只回脱敏账号） |
+| `POST /dsh-quant-cta/api/credentials` | 保存账号密码（并可选验证连通） |
+| `DELETE /dsh-quant-cta/api/credentials` | 删除本机凭据 |
+| `POST /dsh-quant-cta/api/credentials/test` | 只测连通、不保存 |
+| `GET /dsh-quant-cta/panel` | 面板页面 |
 
 ### 命令行
 
@@ -126,7 +141,7 @@ python -m qcta paper step --live
 ## 开发
 
 ```bash
-python -m unittest discover -s python/tests -t python   # 35 个单测
+python -m unittest discover -s python/tests -t python   # 43 个单测
 node --check lib/index.js                              # 插件语法
 node tools/smoke.mjs                                   # 插件冒烟（假 ctx + 真引擎）
 cd python && python -m qcta backtest --pool starter --start 2021-01-01 --name ci_run

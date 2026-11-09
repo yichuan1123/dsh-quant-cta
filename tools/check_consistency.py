@@ -32,13 +32,14 @@ def main():
     n_tests = int(m.group(1)) if m else -1
 
     tools_all = all(("qcta_" + n) in readme for n in ("doctor", "data", "backtest", "report", "paper"))
-    routes_all = "/dsh-quant-cta/panel" in readme
+    routes_all = all(p in readme for p in ("/dsh-quant-cta/panel", "/dsh-quant-cta/api/credentials",
+                                          "/dsh-quant-cta/api/overview", "/dsh-quant-cta/api/report"))
 
     checks = [
         ("品种规格表条数", n_specs, 28, "28 个品种" in readme),
         ("插件工具数", n_tools, 5, tools_all),
-        ("Web 路由数", n_routes, 3, routes_all),
-        ("单元测试数", n_tests, 35, "35 个单测" in readme),
+        ("Web 路由数", n_routes, 5, routes_all),
+        ("单元测试数", n_tests, 43, "43 个单测" in readme),
     ]
 
     ok = True
