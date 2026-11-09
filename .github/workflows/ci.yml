@@ -27,6 +27,9 @@ jobs:
       - name: 账本恒等式核验
         run: python tools/verify_invariants.py runs/ci_run
 
+      - name: 文档与实现一致性
+        run: python tools/check_consistency.py
+
       - name: 插件语法
         run: node --check lib/index.js
 
