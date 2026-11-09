@@ -1,0 +1,122 @@
+# dsh-quant-cta
+
+商品期货 CTA 的**研究 → 回测 → 模拟盘**全链路工作台，以 DSH 插件形式提供工具与面板，引擎用 Python 实现，行情来自天勤 TqSdk（真实）或确定性合成数据（无凭据时兜底并显式标注）。
+
+**本程序不发任何真实委托**：没有 CTP 下单路径，paper 模式只写内部账本。
+
+## 它做了什么
+
+一条完整的交易流程，每一环都在代码里，不是示意：
+
+| 环节 | 实现位置 | 说明 |
+|---|---|---|
+| 行情获取 | [python/qcta/data.py](python/qcta/data.py) | 天勤主连日线（复权）/ 本地 CSV 缓存 / 确定性合成数据 |
+| 合约规格 | [python/qcta/specs.py](python/qcta/specs.py) | 28 个品种的乘数、跳价、保证金率、手续费 |
+| 策略信号 | [python/qcta/strategies/](python/qcta/strategies) | 唐奇安突破、横截面动量 |
+| 仓位换算 | [python/qcta/sizing.py](python/qcta/sizing.py) | ATR 波动率预算 → 手数，按 sqrt(Σw²) 归一 |
+| 撮合与账本 | [python/qcta/account.py](python/qcta/account.py) | 期货会计口径、手续费精确摊分、滑点、保证金校验 |
+| 事件循环 | [python/qcta/engine.py](python/qcta/engine.py) | t 收盘决策 → t+1 开盘成交，逐日盯市、熔断、止损 |
+| 绩效归因 | [python/qcta/metrics.py](python/qcta/metrics.py) | CAGR/夏普/回撤/卡玛/PF/月度矩阵/分策略/分品种 |
+| 报告输出 | [python/qcta/report.py](python/qcta/report.py) | Markdown + JSON + 手写 SVG 曲线 |
+| 模拟盘 | [python/qcta/paper.py](python/qcta/paper.py) | 逐日推进的可断点账本 + 前瞻日志 |
+| DSH 工具 | [lib/index.js](lib/index.js) | qcta_doctor / qcta_data / qcta_backtest / qcta_report / qcta_paper |
+| Web 面板 | [panel.html](panel.html) | /dsh-quant-cta/panel |
+
+## 安装
+
+### 1. 装成本地 DSH 插件
+
+```bash
+# 方式 A：本地链接（开发用）
+cd ~/.dsh/profiles/desktop
+pnpm add link:J:/DSH1J/dsh-quant-cta
+
+# 方式 B：npm 公开包（发布后）
+dsh plugin add dsh-quant-cta
+```
+
+然后把包名加进 profile 的 `dsh.profile.bundles`，重启 DSH。插件自带 `cordis.patch.yml`，会把自己插进插件名单。
+
+### 2. 装 Python 依赖
+
+```bash
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple pandas tqsdk
+```
+
+插件按以下顺序找 Python：`config.pythonPath` → `QCTA_PYTHON` → `<插件目录>/.venv` → `PATH` 里的 `python`。
+
+### 3. 配天勤账号（可选，但强烈建议）
+
+免费注册快期账号后：
+
+```bash
+set QCTA_TQ_USER=你的账号
+set QCTA_TQ_PASS=你的密码
+```
+
+或写 `credentials.json`（已在 .gitignore 里）：
+
+```json
+{"tq_user": "手机号", "tq_pass": "密码"}
+```
+
+没有凭据时引擎仍能跑，但只用合成数据，报告顶部有醒目标注。
+
+## 用法
+
+### 在对话里（最省事）
+
+```
+qcta_doctor                                   # 先自检
+qcta_data   action="sync" live=true           # 拉真实行情
+qcta_backtest pool="default" start="2019-01-01" live=true
+qcta_report action="get"
+qcta_paper  action="init"; qcta_paper action="step"
+```
+
+面板：`http://127.0.0.1:58080/dsh-quant-cta/panel`
+
+### 命令行
+
+```bash
+cd python
+python -m qcta doctor
+python -m qcta data sync --live --pool default
+python -m qcta backtest --pool default --start 2019-01-01 --json
+python -m qcta backtest --pool starter --sleeves trend:0.6,xsec:0.4 --vol 0.10
+python -m qcta runs
+python -m qcta report --run 20260101_120000_trend06-xsec04
+python -m qcta paper init --pool starter --capital 300000
+python -m qcta paper step --live
+```
+
+## 回测口径（写死的，不是可选项）
+
+1. **信号 t 日收盘产生，t+1 日开盘成交** —— 防未来函数的核心。用当日收盘价成交会系统性高估收益。
+2. **手数按波动率预算换算**，等权时按 `sqrt(Σw²)` 归一，使零相关近似下组合风险 ≈ 目标波动。
+3. **成本**：手续费按合约规格（按额/按手取大，平今倍率），滑点默认 1 跳/笔。
+4. **保证金校验**：开仓前检查可用资金，不足则按可负担手数缩减并记拒单。
+5. **风控**：单品种风险上限、名义杠杆上限、组合回撤熔断、ATR 止损（默认关闭）。
+6. **期末强制平仓**，保证 `期末权益 − 初始资金 == Σ 交易净盈亏`（有单测守着这条恒等式）。
+
+细节见 [docs/DESIGN.md](docs/DESIGN.md)。
+
+## 它做不到什么
+
+- **没有实盘下单**。要接 CTP 得自己写，且先想清楚风控。
+- **拿不到真实盘中滑点**。日频撮合用开盘价 ± 固定跳数，真实冲击成本只有实盘有。
+- **合约规格是近似值**。手续费/保证金随交易所公告调整，下单前必须核对。
+- **合成数据不是行情**。它只用来验证流程，报告里永远标注 `synthetic`。
+- **不构成投资建议**。历史回测不代表未来收益。
+
+## 开发
+
+```bash
+cd python && python -m unittest discover -s tests -v   # 32 个单测
+node --check lib/index.js                               # 插件语法
+```
+
+## 许可证
+
+MIT

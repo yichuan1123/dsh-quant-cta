@@ -1,0 +1,53 @@
+"""唐奇安通道突破（趋势跟随）。
+
+规则（经典海龟骨架，参数刻意用大众值，不做优化）：
+- 收盘价突破过去 entry 根的最高价 → 做多
+- 收盘价跌破过去 exit 根的最低价 → 平多并反手做空
+- 反向对称
+这是「止损反手」系统：永远在场上，方向由最近一次突破决定。
+"""
+
+from ..indicators import rolling_max, rolling_min
+from .base import Strategy
+
+
+class DonchianTrend(Strategy):
+    name = "trend"
+
+    def __init__(self, entry: int = 20, exit: int = 10, enabled: bool = True):
+        self.entry = int(entry)
+        self.exit = int(exit)
+        self.enabled = enabled
+        self.warmup = max(self.entry, self.exit) + 2
+
+    def generate(self, bundle, cfg):
+        all_dates = bundle.dates
+        per_code = {}
+
+        for code, bars in bundle.bars_by_code.items():
+            if not self.enabled or len(bars) < self.warmup:
+                continue
+            highs = [b.high for b in bars]
+            lows = [b.low for b in bars]
+            upper = rolling_max(highs, self.entry)
+            lower = rolling_min(lows, self.exit)
+            direction = 0
+            timeline = {}
+            for i in range(self.warmup, len(bars)):
+                up = upper[i]
+                lo = lower[i]
+                if up is None or lo is None:
+                    continue
+                close = bars[i].close
+                new_dir = direction
+                if close > up:
+                    new_dir = 1
+                elif close < lo:
+                    new_dir = -1
+                if new_dir != direction:
+                    direction = new_dir
+                    timeline[bars[i].date] = direction
+            if timeline:
+                per_code[code] = timeline
+
+        return self._emit_on_change(per_code, all_dates)

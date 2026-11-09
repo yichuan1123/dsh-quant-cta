@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>量化 CTA 工作台</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --text: #e6e8ee;
+    --muted: #949cad; --accent: #5b8cff; --up: #29c08a; --down: #e5533d; --warn: #f0b429;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  header { padding: 18px 24px 12px; border-bottom: 1px solid var(--line); display: flex;
+           align-items: center; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  .badge { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line);
+           color: var(--muted); background: #12151b; }
+  .badge.ok { color: var(--up); border-color: #1f4a3a; background: #10231c; }
+  .badge.warn { color: var(--warn); border-color: #4a3d1a; background: #221c0f; }
+  .spacer { flex: 1; }
+  button, select { background: #12151b; color: var(--text); border: 1px solid var(--line);
+                   border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  button:hover, select:hover { border-color: #3a4a5e; }
+  main { padding: 20px 24px 60px; max-width: 1280px; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .card .k { font-size: 11.5px; color: var(--muted); letter-spacing: .4px; margin-bottom: 6px; }
+  .card .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .v.up { color: var(--up); } .v.down { color: var(--down); }
+  section { margin-bottom: 26px; }
+  section h2 { font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .6px;
+               text-transform: uppercase; margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.num { text-align: right; } th.num { text-align: right; }
+  .curve { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+  .empty { color: var(--muted); padding: 26px; text-align: center; border: 1px dashed var(--line); border-radius: 12px; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .warnbox { border: 1px solid #4a3d1a; background: #221c0f; color: var(--warn); padding: 10px 14px;
+             border-radius: 10px; font-size: 13px; margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>量化 CTA 工作台</h1>
+  <span id="src" class="badge">—</span>
+  <span id="runid" class="badge">—</span>
+  <span class="spacer"></span>
+  <select id="runs"></select>
+  <button id="refresh">刷新</button>
+</header>
+<main>
+  <div id="warn"></div>
+  <div class="grid" id="cards"></div>
+  <section>
+    <h2>净值与回撤</h2>
+    <div class="curve"><div id="chart"></div></div>
+    <div class="note" id="chartnote"></div>
+  </section>
+  <section>
+    <h2>策略腿归因</h2>
+    <div id="sleeves"></div>
+  </section>
+  <section>
+    <h2>品种归因</h2>
+    <div id="symbols"></div>
+  </section>
+  <section>
+    <h2>模拟盘</h2>
+    <div id="paper"></div>
+  </section>
+  <section>
+    <h2>最近成交</h2>
+    <div id="trades"></div>
+  </section>
+</main>
+<script>
+(function () {
+  var state = { overview: null, runId: '' };
+
+  function el(tag, cls, text) {
+    var d = document.createElement(tag);
+    if (cls) d.className = cls;
+    if (text !== undefined && text !== null) d.textContent = String(text);
+    return d;
+  }
+
+  function pct(v) {
+    if (v === null || v === undefined || isNaN(v)) return '—';
+    return Number(v).toFixed(2) + '%';
+  }
+
+  function money(v) {
+    if (v === null || v === undefined || isNaN(v)) return '—';
+    return Math.round(Number(v)).toLocaleString('en-US');
+  }
+
+  function num(v, nd) {
+    if (v === null || v === undefined || isNaN(v)) return '—';
+    return Number(v).toFixed(nd === undefined ? 2 : nd);
+  }
+
+  function card(k, v, cls) {
+    var c = el('div', 'card');
+    c.appendChild(el('div', 'k', k));
+    var val = el('div', 'v' + (cls ? ' ' + cls : ''), v);
+    c.appendChild(val);
+    return c;
+  }
+
+  function drawCurve(curve) {
+    var host = document.getElementById('chart');
+    host.innerHTML = '';
+    if (!curve || curve.length < 2) {
+      host.appendChild(el('div', 'empty', '没有净值数据'));
+      return;
+    }
+    var W = 1180, H = 300, pl = 70, pr = 20, pt = 16, pb = 26;
+    var w = W - pl - pr, h = H - pt - pb;
+    var eq = curve.map(function (p) { return p.equity; });
+    var lo = Math.min.apply(null, eq), hi = Math.max.apply(null, eq);
+    if (hi - lo < 1) hi = lo + 1;
+    function X(i) { return pl + w * i / (eq.length - 1); }
+    function Y(v) { return pt + h - h * (v - lo) / (hi - lo); }
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('width', '100%');
+    svg.style.display = 'block';
+    var i, k, g, t, path = '';
+    for (k = 0; k <= 4; k++) {
+      var v = lo + (hi - lo) * k / 4, y = Y(v);
+      g = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      g.setAttribute('x1', pl); g.setAttribute('x2', pl + w);
+      g.setAttribute('y1', y); g.setAttribute('y2', y);
+      g.setAttribute('stroke', '#262b36'); g.setAttribute('stroke-width', '1');
+      svg.appendChild(g);
+      t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', pl - 8); t.setAttribute('y', y + 4);
+      t.setAttribute('fill', '#949cad'); t.setAttribute('font-size', '10');
+      t.setAttribute('text-anchor', 'end');
+      t.textContent = money(v);
+      svg.appendChild(t);
+    }
+    for (i = 0; i < eq.length; i++) {
+      path += (i === 0 ? 'M' : 'L') + X(i).toFixed(2) + ' ' + Y(eq[i]).toFixed(2) + ' ';
+    }
+    var line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    line.setAttribute('d', path);
+    line.setAttribute('fill', 'none');
+    line.setAttribute('stroke', '#5b8cff');
+    line.setAttribute('stroke-width', '1.6');
+    svg.appendChild(line);
+    host.appendChild(svg);
+    document.getElementById('chartnote').textContent =
+      curve.length + ' 个交易日 · 期末权益 ' + money(eq[eq.length - 1]);
+  }
+
+  function table(rows, cols) {
+    if (!rows || rows.length === 0) return el('div', 'empty', '没有数据');
+    var t = el('table');
+    var thead = el('thead'), tr = el('tr');
+    cols.forEach(function (c) {
+      var th = el('th', c.num ? 'num' : '', c.label);
+      tr.appendChild(th);
+    });
+    thead.appendChild(tr); t.appendChild(thead);
+    var tb = el('tbody');
+    rows.forEach(function (r) {
+      var row = el('tr');
+      cols.forEach(function (c) {
+        var td = el('td', c.num ? 'num' : '', c.get(r));
+        if (c.cls) td.className += ' ' + c.cls(r);
+        row.appendChild(td);
+      });
+      tb.appendChild(row);
+    });
+    t.appendChild(tb);
+    return t;
+  }
+
+  function renderRun(d) {
+    var root = d;
+    var m = (root.metrics || {});
+    var meta = (root.meta || {});
+    document.getElementById('runid').textContent = meta.run_id || '—';
+    var srcEl = document.getElementById('src');
+    srcEl.textContent = '数据来源 ' + (meta.data_source || '—');
+    srcEl.className = 'badge ' + (meta.data_source === 'synthetic' || meta.data_source === 'mixed' ? 'warn' : 'ok');
+
+    var warn = document.getElementById('warn');
+    warn.innerHTML = '';
+    if (meta.data_source === 'synthetic' || meta.data_source === 'mixed') {
+      warn.appendChild(el('div', 'warnbox',
+        '⚠ 本次结果含合成数据（synthetic）。只能验证流程与成本模型，不能当作真实行情结论。'));
+    }
+
+    var cards = document.getElementById('cards');
+    cards.innerHTML = '';
+    cards.appendChild(card('期末权益', money(m.final_equity)));
+    cards.appendChild(card('年化收益', pct(m.cagr_pct), m.cagr_pct >= 0 ? 'up' : 'down'));
+    cards.appendChild(card('年化波动', pct(m.ann_vol_pct)));
+    cards.appendChild(card('夏普', num(m.sharpe, 2)));
+    cards.appendChild(card('最大回撤', pct(m.max_drawdown_pct), 'down'));
+    cards.appendChild(card('盈亏比 PF', num(m.profit_factor, 2)));
+    cards.appendChild(card('交易笔数', String(m.trades === undefined ? '—' : m.trades)));
+    cards.appendChild(card('成本合计', money(m.cost_total)));
+
+    drawCurve(root.curve || []);
+
+    var sleeveRows = Object.keys(root.sleeves || {}).map(function (k) {
+      var s = root.sleeves[k];
+      return { name: k, strategy: s.strategy, alloc: s.alloc_pct, ret: s.return_pct, sharpe: s.sharpe, dd: s.max_drawdown_pct, trades: s.trades };
+    });
+    var sHost = document.getElementById('sleeves');
+    sHost.innerHTML = '';
+    sHost.appendChild(table(sleeveRows, [
+      { label: '策略腿', get: function (r) { return r.name; } },
+      { label: '策略', get: function (r) { return r.strategy; } },
+      { label: '资金占比', num: true, get: function (r) { return pct(r.alloc); } },
+      { label: '收益', num: true, get: function (r) { return pct(r.ret); },
+        cls: function (r) { return r.ret >= 0 ? 'up' : 'down'; } },
+      { label: '夏普', num: true, get: function (r) { return num(r.sharpe, 2); } },
+      { label: '最大回撤', num: true, get: function (r) { return pct(r.dd); } },
+      { label: '交易数', num: true, get: function (r) { return String(r.trades); } }
+    ]));
+
+    var symRows = Object.keys(root.symbols || {}).map(function (k) {
+      var s = root.symbols[k];
+      return { code: k, pnl: s.pnl, win: s.win_rate_pct, trades: s.trades };
+    });
+    var yHost = document.getElementById('symbols');
+    yHost.innerHTML = '';
+    yHost.appendChild(table(symRows, [
+      { label: '品种', get: function (r) { return r.code; } },
+      { label: '净盈亏', num: true, get: function (r) { return money(r.pnl); },
+        cls: function (r) { return r.pnl >= 0 ? 'up' : 'down'; } },
+      { label: '胜率', num: true, get: function (r) { return pct(r.win); } },
+      { label: '交易数', num: true, get: function (r) { return String(r.trades); } }
+    ]));
+
+    var tHost = document.getElementById('trades');
+    tHost.innerHTML = '';
+    var trades = (root.trades || []).slice().reverse();
+    tHost.appendChild(table(trades, [
+      { label: '品种', get: function (r) { return r.symbol; } },
+      { label: '方向', get: function (r) { return r.direction > 0 ? '多' : '空'; } },
+      { label: '开仓日', get: function (r) { return r.open_date; } },
+      { label: '平仓日', get: function (r) { return r.close_date; } },
+      { label: '盈亏', num: true, get: function (r) { return money(r.pnl); },
+        cls: function (r) { return r.pnl >= 0 ? 'up' : 'down'; } }
+    ]));
+  }
+
+  function renderPaper(p) {
+    var host = document.getElementById('paper');
+    host.innerHTML = '';
+    if (!p) {
+      host.appendChild(el('div', 'empty', '还没有模拟盘会话。让 agent 调 qcta_paper action="init" 建立。'));
+      return;
+    }
+    var m = p.metrics || {};
+    var grid = el('div', 'grid');
+    grid.appendChild(card('最新交易日', p.last_date || '—'));
+    grid.appendChild(card('权益', money(m.final_equity)));
+    grid.appendChild(card('总收益', pct(m.total_return_pct), m.total_return_pct >= 0 ? 'up' : 'down'));
+    grid.appendChild(card('回撤', pct(m.max_drawdown_pct), 'down'));
+    host.appendChild(grid);
+    host.appendChild(table(p.positions || [], [
+      { label: '品种', get: function (r) { return r.symbol; } },
+      { label: '方向', get: function (r) { return r.direction > 0 ? '多' : '空'; } },
+      { label: '手数', num: true, get: function (r) { return String(r.lots); } },
+      { label: '开仓均价', num: true, get: function (r) { return num(r.avg_price, 2); } },
+      { label: '最新价', num: true, get: function (r) { return num(r.last_price, 2); } }
+    ]));
+  }
+
+  function renderOverview(ov) {
+    state.overview = ov;
+    var sel = document.getElementById('runs');
+    sel.innerHTML = '';
+    (ov.runs || []).forEach(function (r) {
+      var o = document.createElement('option');
+      o.value = r.run_id;
+      o.textContent = r.run_id + '  (' + (r.data_source || '') + ')';
+      sel.appendChild(o);
+    });
+    if (ov.latest) {
+      state.runId = (ov.latest.meta || {}).run_id || '';
+      if (state.runId) sel.value = state.runId;
+      renderRun(ov.latest);
+    } else {
+      document.getElementById('cards').innerHTML = '';
+      document.getElementById('chart').innerHTML = '';
+      var c = document.getElementById('chart');
+      c.appendChild(el('div', 'empty', '还没有回测。让 agent 跑 qcta_backtest，或调 /dsh-quant-cta/api/overview 确认引擎可用。'));
+    }
+    renderPaper(ov.paper);
+  }
+
+  function load() {
+    fetch('/dsh-quant-cta/api/overview', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(renderOverview)
+      .catch(function (e) {
+        document.getElementById('warn').innerHTML = '';
+        document.getElementById('warn').appendChild(el('div', 'warnbox', '读取失败：' + String(e)));
+      });
+  }
+
+  document.getElementById('refresh').addEventListener('click', load);
+  document.getElementById('runs').addEventListener('change', function (ev) {
+    var id = ev.target.value;
+    if (!id) return;
+    fetch('/dsh-quant-cta/api/report?run=' + encodeURIComponent(id), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { renderRun(d); })
+      .catch(function () { /* ignore */ });
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

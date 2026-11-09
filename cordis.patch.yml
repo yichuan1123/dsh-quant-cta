@@ -1,0 +1,5 @@
+# dsh-quant-cta bundle patch：把插件行插入 profile 名单。
+# 宿主端注册 qcta_* 工具与 /dsh-quant-cta/* 路由；Python 引擎在 <插件目录>/python 下。
+- insert:
+    - id: dsh-quant-cta
+      name: 'dsh-quant-cta'

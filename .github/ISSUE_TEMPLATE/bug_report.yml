@@ -1,0 +1,37 @@
+name: Bug 报告
+description: 回测结果异常、报错、数据问题
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 具体现象、期望结果、实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 命令或工具调用参数（**不要贴账号密码**）
+      placeholder: |
+        python -m qcta backtest --pool starter --start 2020-01-01
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      placeholder: Windows 11 / Python 3.9.13 / tqsdk 3.10.4 / 插件版本 0.1.0
+  - type: dropdown
+    id: source
+    attributes:
+      label: 数据来源
+      options: ["synthetic（合成）", "tqsdk（真实）", "cache（缓存）", "不确定"]
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: 确认
+      options:
+        - label: 我知道合成数据的结果不能当真实行情结论
+          required: true

@@ -1,0 +1,65 @@
+{
+  "name": "dsh-quant-cta",
+  "version": "0.1.0",
+  "description": "商品期货 CTA 工作台：真实行情（天勤 TqSdk）驱动的研究、回测、模拟盘全链路，含成本模型与风控。不发任何真实委托。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./panel": "./panel.html",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "python",
+    "panel.html",
+    "cordis.patch.yml",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "quant",
+    "cta",
+    "futures",
+    "backtest",
+    "paper-trading",
+    "tqsdk",
+    "量化",
+    "期货",
+    "回测"
+  ],
+  "author": "yichuan1123",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yichuan1123/dsh-quant-cta.git"
+  },
+  "homepage": "https://github.com/yichuan1123/dsh-quant-cta#readme",
+  "bugs": {
+    "url": "https://github.com/yichuan1123/dsh-quant-cta/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "python -m unittest discover -s tests",
+    "check": "node --check lib/index.js"
+  },
+  "dsh": {
+    "category": "extension",
+    "displayName": "量化 CTA 工作台",
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh": ">=0.2.0"
+  }
+}

@@ -1,0 +1,27 @@
+name: 功能建议
+description: 新策略、新指标、新数据源或流程改进
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决什么问题
+      description: 描述场景，不要直接跳到方案
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及部分
+      options: ["数据层", "策略", "仓位/风控", "撮合/账本", "绩效/报告", "模拟盘", "DSH 插件/面板", "文档"]
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: 边界确认
+      options:
+        - label: 该需求不包含真实下单（本项目不接 CTP 实盘）
+          required: false
