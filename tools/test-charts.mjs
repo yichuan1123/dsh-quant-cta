@@ -154,6 +154,20 @@ const host5 = node('div')
 C.drawLine(host5, { points: [] })
 assert(all(host5, 'text').length === 1, '空数据折线图给出占位文本')
 
+/* ── 6.5 画布不拉伸：宽度取容器真实像素、顺时针等比 ── */
+assert(C.hostWidth({ clientWidth: 0 }, 660) === 660, 'hostWidth 无宽度时回落到备用值')
+assert(C.hostWidth({ clientWidth: 100 }, 660) === 320, 'hostWidth 下限 320（太窄会看不清刻度）')
+assert(C.hostWidth({ clientWidth: 99999 }, 660) === 1600, 'hostWidth 上限 1600')
+assert(C.hostWidth({ clientWidth: 812 }, 660) === 812, 'hostWidth 用容器实际宽度')
+
+const hostScale = node('div')
+hostScale.clientWidth = 812
+C.drawLine(hostScale, { points: pts, color: '#5b8cff', height: 240 })
+const svgScale = hostScale.children[0]
+assert(String(svgScale.attrs.preserveAspectRatio).indexOf('none') < 0, 'SVG 不再用 preserveAspectRatio=none（避免拉伸变形）')
+assert(svgScale.attrs.width === '812', 'SVG 宽度 = 容器宽度（实际 ' + svgScale.attrs.width + '）')
+assert(String(svgScale.attrs.viewBox).endsWith(' 812 240'), 'viewBox 宽与画布宽一致（无缩放）')
+
 /* ── 7. 降采样：保形 ── */
 const series = []
 for (let i = 0; i < 2000; i++) {

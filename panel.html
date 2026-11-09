@@ -61,10 +61,11 @@
   .fieldlabel .inp { min-width: 150px; }
   .tabbtn { padding: 4px 11px; font-size: 12px; }
   .tabbtn.on { border-color: #35507f; background: #16203a; color: #cfe0ff; }
-  .axis text { fill: #8a8a99; font-size: 10px; font-variant-numeric: tabular-nums; }
+  .axis text { fill: #9aa3b2; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .chart-wrap svg text { font-family: inherit; }
   .halt-line { stroke: #e5533d; stroke-width: 1; stroke-dasharray: 5 4; opacity: .75; }
   .cap-line { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 4 3; opacity: .8; }
-  .grid-line { stroke: #20242e; stroke-width: 1; }
+  .grid-line { stroke: #1b1f27; stroke-width: 1; }
   .inp { background: #12151b; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
          padding: 8px 12px; font-size: 13px; min-width: 200px; outline: none; }
   .inp:focus { border-color: #3a4a5e; }
@@ -759,16 +760,38 @@
   }
 
   /**
-   * 建 SVG 画布。
-   * preserve='none'（默认）让折线/柱状图横向铺满；
-   * 圆形图必须用 'xMidYMid meet'，否则宽高比一变就被拉成椭圆。
+   * 取容器可用宽度。
+   * 图表一律**按容器真实像素宽渲染**（1 单位 = 1 CSS 像素），
+   * 而不是给个固定 viewBox 再靠 preserveAspectRatio 拉伸——
+   * 拉伸会非等比缩放文字与线宽，页面一缩放就糊。
    */
+  function hostWidth(host, fallback, maxW) {
+    var w = 0;
+    try {
+      if (host && host.clientWidth) w = host.clientWidth;
+      else if (host && host.parentNode && host.parentNode.clientWidth) w = host.parentNode.clientWidth;
+    } catch (e) { w = 0; }
+    // 只有「量不到」才用备用值；量到了但很窄，就夹到下限（宁可横向出一点，也不糊字）
+    if (!w) w = fallback || 660;
+    return Math.max(320, Math.min(maxW || 1600, Math.round(w)));
+  }
+
+  /** 建 SVG 画布：宽高即真实像素，等比（meet）——因此只要 w 与容器一致就不会有任何形变。 */
   function makeSvg(host, w, h, label, preserve) {
     clearHost(host);
-    var svg = svgEl('svg', { viewBox: '0 0 ' + w + ' ' + h, width: '100%', height: String(h),
-                             preserveAspectRatio: preserve || 'none', role: 'img' });
+    var svg = svgEl('svg', {
+      viewBox: '0 0 ' + w + ' ' + h,
+      width: String(w),
+      height: String(h),
+      preserveAspectRatio: preserve || 'xMidYMid meet',
+      role: 'img',
+    });
     if (label) svg.setAttribute('aria-label', label);
-    if (svg.style) { svg.style.display = 'block'; svg.style.margin = '0 auto'; }
+    if (svg.style) {
+      svg.style.display = 'block';
+      svg.style.maxWidth = '100%';
+      svg.style.margin = '0 auto';
+    }
     host.appendChild(svg);
     return svg;
   }
@@ -893,9 +916,9 @@
 
   /** 动态折线图：刻度 + 参考线 + 极值/末值标记 + 叠加线 + 副轴 + 悬停十字线。 */
   function drawLine(host, opts) {
-    var W = 660, H = opts.height || 230;
-    var pad = { l: 58, r: 16, t: 16, b: 24 };
-    if (opts.secondary) pad.r = 54;
+    var W = hostWidth(host, 660), H = opts.height || 230;
+    var pad = { l: 64, r: 16, t: 18, b: 26 };
+    if (opts.secondary) pad.r = 58;
     var raw = opts.points || [];
     var pts = lttb(raw, 800);
     var svg = makeSvg(host, W, H, opts.label || '折线图');
@@ -1178,8 +1201,8 @@
 
   /** 逐日收益柱图（正绿负红）+ 可选累计线。 */
   function drawBars(host, opts) {
-    var W = 660, H = opts.height || 200;
-    var pad = { l: 52, r: 52, t: 14, b: 22 };   // 右侧留给累计线标签
+    var W = hostWidth(host, 660), H = opts.height || 210;
+    var pad = { l: 58, r: 56, t: 18, b: 24 };   // 右侧留给累计线标签
     var items = opts.items || [];
     var svg = makeSvg(host, W, H, '逐日收益柱图');
     if (!items.length) {
@@ -1509,6 +1532,22 @@
     }
   }
 
+  /** 尺寸变化后重绘：图是 1:1 像素画的，窗口变了必须重画，不能让它被 CSS 拉伸。 */
+  var resizeTimer = null;
+  function onResize() {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { rerenderCharts(); }, 160);
+  }
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('resize', onResize);
+  }
+  if (typeof ResizeObserver === 'function') {
+    try {
+      var mainEl = document.querySelector('main');
+      if (mainEl) new ResizeObserver(onResize).observe(mainEl);
+    } catch (e) { /* 没有就算了，window.resize 也能兜住 */ }
+  }
+
   loadParams();
   syncParamInputs();
   bindParams();
@@ -1517,7 +1556,7 @@
   window.__dshQuantCtaCharts = {
     drawLine: drawLine, drawDonut: drawDonut, drawBars: drawBars, drawSectorBars: drawSectorBars,
     niceTicks: niceTicks, colorMap: colorMap, sectorColor: sectorColor, constraintsText: constraintsText,
-    fmtAxis: fmtAxis, lttb: lttb, timeTicks: timeTicks, rollingVol: rollingVol,
+    fmtAxis: fmtAxis, lttb: lttb, timeTicks: timeTicks, rollingVol: rollingVol, hostWidth: hostWidth,
     __setCurve: function (c) { LAST_CURVE = c; renderIntraday(); },
     __setIntradayMode: function (m) { INTRADAY_MODE = m; },
     __setParams: function (p) { PARAMS = p; syncParamInputs(); },
