@@ -7,6 +7,7 @@ SVG 用标准库手写，不引 matplotlib —— 无头环境里中文字体经
 import json
 import os
 
+from . import verdict as _verdict
 from .metrics import attribution_by_sleeve, attribution_by_symbol
 
 
@@ -149,6 +150,10 @@ def render_markdown(result, meta=None):
         a("| " + y + " | " + " | ".join(cells) + " | " + _p(m.get("yearly_returns_pct", {}).get(y)) + " |")
     a("")
 
+    vd = meta.get("verdict")
+    if vd:
+        L.extend(_verdict.render_markdown(vd, n_trials=meta.get("n_trials", 1)))
+
     a("## 口径说明")
     a("")
     a("- 信号在 **t 日收盘** 产生，**t+1 日开盘** 成交；不使用当日收盘成交（防未来函数）")
@@ -213,14 +218,22 @@ def render_svg(result, width=960, height=360):
     )
 
 
-def write_reports(out_dir, result, meta=None):
+def write_reports(out_dir, result, meta=None, n_trials=1):
     os.makedirs(out_dir, exist_ok=True)
+    meta = dict(meta or {})
+    meta["n_trials"] = n_trials
+    meta["verdict"] = _verdict.analyze(
+        [r.equity for r in result.aggregate],
+        [r.date for r in result.aggregate],
+        result.trades,
+        n_trials=n_trials,
+    )
     with open(os.path.join(out_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(render_markdown(result, meta))
     with open(os.path.join(out_dir, "report.svg"), "w", encoding="utf-8") as fh:
         fh.write(render_svg(result))
     payload = {
-        "meta": meta or {},
+        "meta": meta,
         "config": {
             "start_date": result.cfg.start_date,
             "end_date": result.cfg.end_date,

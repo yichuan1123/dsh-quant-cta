@@ -324,6 +324,16 @@ def cmd_optimize(args):
 # ───────────────────────────── backtest ─────────────────────────────
 
 def _config_from_args(args):
+    sleeves = parse_sleeves(args.sleeves)
+    te = int(getattr(args, "trend_entry", 0) or 0)
+    tx = int(getattr(args, "trend_exit", 0) or 0)
+    if te or tx:
+        for s in sleeves:
+            if s["strategy"] == "trend":
+                if te:
+                    s["kwargs"]["entry"] = te
+                if tx:
+                    s["kwargs"]["exit"] = tx
     return EngineConfig(
         start_date=args.start,
         end_date=args.end or "",
@@ -335,7 +345,7 @@ def _config_from_args(args):
         max_drawdown_halt=args.dd_halt,
         max_symbol_risk=args.symbol_risk,
         stop_atr=args.stop_atr,
-        sleeves=tuple(parse_sleeves(args.sleeves)),
+        sleeves=tuple(sleeves),
         sizing=getattr(args, "sizing", "vol_parity"),
         model_method=getattr(args, "method", "risk_parity"),
         model_lookback=getattr(args, "lookback", 250),
@@ -375,7 +385,7 @@ def cmd_backtest(args):
         "pool": codes,
         "version": __version__,
     }
-    write_reports(out, result, meta)
+    write_reports(out, result, meta, n_trials=getattr(args, "trials", 1) or 1)
     payload = {
         "ok": True,
         "run_id": run_id,
@@ -469,6 +479,46 @@ def cmd_report(args):
     return 0
 
 
+def cmd_stats(args):
+    """对某次回测做统计体检（不重跑引擎，直接读 report.json）。"""
+    from types import SimpleNamespace
+
+    from . import verdict
+
+    base = runs_dir()
+    if args.run:
+        path = args.run if os.path.isdir(args.run) else os.path.join(base, args.run)
+    else:
+        rows = list_runs()
+        if not rows:
+            return _emit({"ok": False, "error": "还没有任何回测记录，先跑 qcta backtest"}, args.json, lambda p: p["error"])
+        path = rows[0]["path"]
+    rj = os.path.join(path, "report.json")
+    if not os.path.exists(rj):
+        return _emit({"ok": False, "error": "找不到 %s" % rj}, args.json, lambda p: p["error"])
+    with open(rj, "r", encoding="utf-8") as fh:
+        data = json.load(fh)
+
+    curve = data.get("curve") or []
+    equity = [c["equity"] for c in curve]
+    dates = [c.get("date") for c in curve]
+    trades = [SimpleNamespace(net_pnl=t.get("pnl", 0.0)) for t in (data.get("trades") or [])]
+    n_trials = args.trials or (data.get("meta") or {}).get("n_trials") or 1
+    v = verdict.analyze(equity, dates, trades, n_trials=n_trials)
+
+    if args.json:
+        return _emit(v, True, lambda p: "")
+
+    lines = verdict.render_markdown(v, n_trials=n_trials)
+    text = "\n".join(lines)
+    sys.stdout.write(text + "\n")
+    if args.write:
+        with open(os.path.join(path, "stats.md"), "w", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+        sys.stderr.write("已写入 %s\n" % os.path.join(path, "stats.md"))
+    return 0
+
+
 # ───────────────────────────── main ─────────────────────────────
 
 def build_parser():
@@ -527,6 +577,11 @@ def build_parser():
     b.add_argument("--exclude-sectors", dest="exclude_sectors", default="")
     b.add_argument("--recycle-budget", dest="recycle_budget", action="store_true",
                    help="把算出 0 手的品种预算回填给能下单的品种（会显著放大实际波动，慎用）")
+    b.add_argument("--trend-entry", dest="trend_entry", type=int, default=0,
+                   help="唐奇安入场通道（默认 40，覆盖 trend 腿）")
+    b.add_argument("--trend-exit", dest="trend_exit", type=int, default=0,
+                   help="唐奇安离场通道（默认 20）")
+    b.add_argument("--trials", type=int, default=1, help="累计试过多少组参数（用于通缩夏普 DSR）")
     b.add_argument("--name", default="")
     b.add_argument("--json", action="store_true")
     b.set_defaults(func=cmd_backtest)
@@ -556,6 +611,13 @@ def build_parser():
     rp.add_argument("--run", default="")
     rp.add_argument("--json", action="store_true")
     rp.set_defaults(func=cmd_report)
+
+    st = sub.add_parser("stats", help="统计体检：夏普可信度、VaR、GARCH、自相关")
+    st.add_argument("--run", default="", help="回测 id 或目录（空=最近一次）")
+    st.add_argument("--trials", type=int, default=0, help="累计试过多少组参数（DSR 用）")
+    st.add_argument("--write", action="store_true", help="同时写入该 run 目录的 stats.md")
+    st.add_argument("--json", action="store_true")
+    st.set_defaults(func=cmd_stats)
 
     from . import paper as _paper
 
