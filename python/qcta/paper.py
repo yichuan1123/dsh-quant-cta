@@ -316,9 +316,14 @@ def _parse_sleeves(text):
     return parse_sleeves(text)
 
 
+JSON_MARKER = "#QCTA-JSON#"
+
+
 def _emit(payload, as_json, text_fn):
     if as_json:
+        sys.stdout.write(JSON_MARKER + "\n")
         sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        sys.stdout.flush()
     else:
         sys.stdout.write(text_fn(payload) + "\n")
     return 0

@@ -177,7 +177,6 @@ def save_credentials(user: str, password: str) -> dict:
     if not u or not p:
         raise ValueError("账号和密码都不能为空")
     path = credentials_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
     stored, scheme = protect(p)
     payload = {
         "tq_user": u,
@@ -189,13 +188,19 @@ def save_credentials(user: str, password: str) -> dict:
     else:
         payload["tq_pass"] = stored
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False)
     try:
-        os.chmod(tmp, 0o600)
-    except OSError:
-        pass
-    os.replace(tmp, path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False)
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except OSError as exc:
+        # 常见原因：路径在工作区之外被沙箱拒绝、或目录只读。
+        # 抛 ValueError，让 CLI 把它变成一句可读的 error，而不是 traceback。
+        raise ValueError("无法写入凭据文件 %s：%s（可把 QCTA_CRED_PATH 指到工作区内）" % (path, exc))
     return credentials_status()
 
 

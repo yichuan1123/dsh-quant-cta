@@ -10,13 +10,18 @@
  */
 
 import http from 'node:http'
-import { existsSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { apply, name } from '../lib/index.js'
 
-const CRED_PATH = join(tmpdir(), 'qcta-smoke-credentials.json')
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+// 注意：插件宿主进程受 DSH 的 workspace-write 沙箱约束，写不了 %TEMP%。
+// 测试产物一律放工作区内（.preview 已 gitignore），否则会误判成「保存失败」。
+const CRED_DIR = join(ROOT, '.preview')
+mkdirSync(CRED_DIR, { recursive: true })
+const CRED_PATH = join(CRED_DIR, 'smoke-credentials.json')
 process.env.QCTA_CRED_PATH = CRED_PATH
 if (existsSync(CRED_PATH)) rmSync(CRED_PATH)
 

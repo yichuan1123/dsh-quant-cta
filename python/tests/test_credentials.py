@@ -103,6 +103,16 @@ class TestCredentials(unittest.TestCase):
         self.assertEqual(st["source"], "env")
         self.assertEqual(dm.load_credentials(), ("env-user", "env-pass"))
 
+    def test_unwritable_path_raises_readable_error(self):
+        # 指向一个不可能创建的路径：父级是普通文件
+        blocker = os.path.join(self.tmp.name, "blocker")
+        with open(blocker, "w", encoding="utf-8") as fh:
+            fh.write("x")
+        os.environ["QCTA_CRED_PATH"] = os.path.join(blocker, "credentials.json")
+        with self.assertRaises(ValueError) as ctx:
+            dm.save_credentials("13800001234", "pw")
+        self.assertIn("无法写入凭据文件", str(ctx.exception))
+
     def test_mask_user_short_input(self):
         self.assertEqual(dm.mask_user("123"), "***")
         self.assertEqual(dm.mask_user(""), "")

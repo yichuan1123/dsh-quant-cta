@@ -55,9 +55,17 @@ def parse_sleeves(text):
     return out
 
 
+JSON_MARKER = "#QCTA-JSON#"
+
+
 def _emit(payload, as_json, text_fn):
     if as_json:
+        # 哨兵行：tqsdk 会把大量日志打到 stdout（免责声明、模拟账户信息…），
+        # 解析方靠"{ … }"猜边界，日志里一旦出现花括号就会解错。
+        # 有了这行标记，解析方只管取标记之后的部分。
+        sys.stdout.write(JSON_MARKER + "\n")
         sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        sys.stdout.flush()
     else:
         sys.stdout.write(text_fn(payload) + "\n")
     return 0
@@ -153,8 +161,10 @@ def cmd_auth(args):
             return _emit({"ok": False, "error": "缺少账号或密码"}, args.json, lambda p: p["error"])
         try:
             status = save_credentials(user, password)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             return _emit({"ok": False, "error": str(exc)}, args.json, lambda p: p["error"])
+        except Exception as exc:  # 兜底：任何异常都要变成一句可读的话
+            return _emit({"ok": False, "error": "保存失败：%s" % exc}, args.json, lambda p: p["error"])
         payload = {"ok": True, "saved": True, "status": status}
         if args.verify:
             payload["probe"] = probe_credentials(user, password, timeout_s=args.timeout)
