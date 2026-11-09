@@ -176,9 +176,6 @@ python -m qcta backtest --pool all --start 2021-01-04 --end 2026-11-09 --trend-e
 
 1. **合约级**（可用）：抓每个品种的各挂牌月份日线 → 每个交易日取最近两个到期月算年化对数斜率。
    已成功抓到 rb / i / m：单品种年化 carry 均值 +7.1%（rb）、64% 的交易日为 backwardation。
-2. **换月缺口**（已证伪）：原本想用「不复权主连 − 前复权主连」的差值反推换月收益，
-   但实测天勤主连在 `adj_type=None` 与 `'F'` 下返回 **2633 天逐点相同**的序列 ——
-   主连本身就是处理过换月的合成序列，复权参数是空操作。这条路走不通，函数保留（对别的数据源有效）并注明。
 
 爬到合约数据的品种：**rb、i、m**（各 34-35 个合约、2634 天）。
 横截面回测需要 6-8 个品种，剩下的抓不动 —— 用户决定先完成代码，数据另找时间补。
@@ -192,7 +189,6 @@ python -m qcta backtest --pool all --start 2021-01-04 --end 2026-11-09 --trend-e
 复现命令（网络正常时）：
 
 ```bash
-python tools/carry_build.py --pool all --chunk 4     # 不复权序列（断点续跑）
 python tools/term_build.py --codes rb --verbose      # 或走合约级（更准，更慢）
 python tools/explore.py --grid carry --slip auto     # carry 单独 / 混合
 ```

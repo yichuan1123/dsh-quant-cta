@@ -170,38 +170,6 @@ def carry_from_rolls(raw, adj):
     return out
 
 
-def load_roll_frames(codes, raw_dir=None):
-    """从 data/raw/*.csv（不复权）+ data/cache/*.csv（前复权）构建 carry 序列。"""
-    import csv as _csv
-    import os
-
-    raw_dir = raw_dir or os.path.join(DATA_DIR, "raw")
-    cache_dir = os.path.join(DATA_DIR, "cache")
-    out = {}
-    for code in codes:
-        rp = os.path.join(raw_dir, code + ".csv")
-        cp = os.path.join(cache_dir, code + ".csv")
-        if not (os.path.exists(rp) and os.path.exists(cp)):
-            continue
-        raw, adj = {}, {}
-        with open(rp, "r", encoding="utf-8") as fh:
-            for row in _csv.DictReader(fh):
-                try:
-                    raw[row["date"]] = float(row["close"])
-                except (KeyError, ValueError):
-                    continue
-        with open(cp, "r", encoding="utf-8") as fh:
-            for row in _csv.DictReader(fh):
-                try:
-                    adj[row["date"]] = float(row["close"])
-                except (KeyError, ValueError):
-                    continue
-        s = carry_from_rolls(raw, adj)
-        if s:
-            out[code] = s
-    return out
-
-
 def load_all(codes, term_dir=None):
     """返回 {code: {date: carry}}，只含真的抓到合约数据的品种。"""
     out = {}

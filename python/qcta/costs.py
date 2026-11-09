@@ -75,7 +75,7 @@ SPREAD_CAP_TICKS = 3.0
 
 
 def slip_ticks_from(spread_ticks=None, range_ticks=None):
-    """滑点（跳）= 半个价差 + 半个跳冲击，向下取整到 1 跳。
+    """滑点（跳）= 半个价差 + 半个跳冲击，取整后不低于 1 跳。
 
     价差代理超过 3 跳时按 3 跳算并标注 `capped`——分钟线分辨不出价差与波动。
     """
