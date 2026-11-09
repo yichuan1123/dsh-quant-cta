@@ -334,7 +334,31 @@ C.drawWeightHeat(heatEmpty, { series: [] })
 assert(heatEmpty.children.length >= 1 && String(heatEmpty.children[0].textContent).indexOf('权重') >= 0,
   '空序列给出提示而不是空白')
 
-for (const chart of [host1, host2, host3, host4, host5, host6, hostScale, multiHost, emptyHost, heatHost]) {
+
+/* ── 期望路径：必须从今天起，不许从回测起点画 ── */
+const projHost = node('div')
+C.drawProjection(projHost, { capital: 1000000, annual: 0.10, vol: 0.25, years: 3, start: '2026-11-09' })
+const projSvg = projHost.children.filter((c) => c.tagName === 'svg')[0]
+assert(projSvg !== undefined, '期望路径图生成了 SVG')
+const projPaths = all(projSvg, 'path')
+assert(projPaths.length >= 2, '期望线 + ±1σ 带都画了（path 数 ' + projPaths.length + '）')
+const projTexts = all(projSvg, 'text').map((t) => String(t.textContent))
+assert(projTexts.some((t) => t.indexOf('2026-11') === 0), '横轴从起点当天开始（' + projTexts.filter((t) => /^\d{4}-\d{2}$/.test(t)).slice(0, 3).join(',') + '）')
+assert(projTexts.some((t) => t.indexOf('±1σ') >= 0), '标注了 ±1σ 区间')
+assert(projTexts.some((t) => t.indexOf('期望') === 0), '标注了期望终值')
+
+// 终点金额必须等于 本金 × (1+期望)^年限（复利口径，不能随手画）
+const endLabel = projTexts.find((t) => t.indexOf('期望') === 0)
+const endNum = Number(String(endLabel).replace(/[^0-9.]/g, ''))
+assert(Math.abs(endNum - 1000000 * Math.pow(1.1, 3)) < 2, '三年终值 = 本金×(1+10%)^3（实际 ' + endNum + '）')
+
+// 历史净值图不应再出现「期望路径」这条从 2016 年起的线
+const curveHost = node('div')
+C.drawLine(curveHost, { points: [{ x: '2016-01-05', y: 100 }, { x: '2016-02-05', y: 101 }] })
+const curveTexts = all(curveHost.children[0], 'text').map((t) => String(t.textContent))
+assert(!curveTexts.some((t) => t.indexOf('期望路径') >= 0), '历史图不再画「期望路径」外推线')
+
+for (const chart of [host1, host2, host3, host4, host5, host6, hostScale, multiHost, emptyHost, heatHost, projHost]) {
   for (const svg of chart.children.filter((c) => c.tagName === 'svg')) textHosts.push(svg)
 }
 let textCount = 0

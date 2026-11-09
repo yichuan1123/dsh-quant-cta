@@ -120,6 +120,18 @@
     <div class="note" id="chartnote"></div>
   </section>
   <section>
+    <h2>从现在起的期望路径<span class="hint">按你设的投入金额与期望年化复利 · 阴影 = ±1σ（用回测实际波动）· 与历史回测无关</span></h2>
+    <div class="formrow" style="margin-bottom:8px">
+      <span class="k" style="font-size:11.5px;color:var(--muted)">投影年限</span>
+      <button class="tabbtn proj-btn" data-proj="1">1 年</button>
+      <button class="tabbtn proj-btn on" data-proj="3">3 年</button>
+      <button class="tabbtn proj-btn" data-proj="5">5 年</button>
+    </div>
+    <div class="curve"><div id="proj"></div></div>
+    <div class="note" id="projnote"></div>
+  </section>
+
+  <section>
     <h2>策略腿归因<span class="hint">累计净盈亏 · 悬停看当日数值 · 滚轮缩放</span></h2>
     <div id="sleeves"></div>
   </section>
@@ -328,7 +340,7 @@
     var ddOk = (m.max_drawdown_pct || 0) <= PARAMS.maxdd;
 
     host.appendChild(card('投入金额', money(cap)));
-    host.appendChild(card('期望期末（' + years.toFixed(1) + ' 年 @' + PARAMS.target + '%）', money(expectEnd)));
+    host.appendChild(card('同期期望（回测期 ' + years.toFixed(1) + ' 年 @' + PARAMS.target + '%）', money(expectEnd)));
     host.appendChild(card('同金额实际期末', money(actualEnd)));
     host.appendChild(card('年化差（实际 − 期望）', (gapPct >= 0 ? '+' : '') + gapPct.toFixed(2) + '%',
       gapPct >= 0 ? 'up' : 'down'));
@@ -368,17 +380,13 @@
     }
     LAST_CURVE = curve;
     var view = sliceRange(curve);
-    // 期望路径：从本区间起点按期望年化复利外推，作为斜率参照（不是预测）
-    var startEq = view[0].equity;
-    var years = view.length / 252;
-    var overlayPts = view.map(function (p, i) {
-      return { x: p.date, y: startEq * Math.pow(1 + PARAMS.target / 100, (i / Math.max(1, view.length - 1)) * years) };
-    });
+    // 注意：这里**不再**画「从回测起点按期望年化外推」的参照线。
+    // 那条线暗示「如果 2016 年就按这个期望复利」，而用户是现在才开始做，
+    // 起点应当是今天 —— 见下面的 renderProjection（独立的向前投影图）。
     drawLine(host, {
       points: view.map(function (p) { return { x: p.date, y: p.equity }; }),
       color: COLORS.accent, height: 240, label: '权益曲线',
       tipFormat: function (v) { return money(v); },
-      overlay: [{ points: overlayPts, color: COLORS.warn, label: '期望路径 ' + PARAMS.target + '%' }],
     });
     drawLine(host2, {
       points: view.map(function (p) { return { x: p.date, y: -p.drawdown * 100 }; }),
@@ -600,6 +608,7 @@
     LAST_RUN = root;
     renderExpectation(root);
     drawCurve(root.curve || []);
+    renderProjection(root);
 
     renderAttribution(root);
     if (root.model && (root.model.series || []).length) {
@@ -1322,6 +1331,143 @@
   }
 
 
+
+  /* ================= 从现在起的期望路径（前向投影） ================= */
+
+  var PROJ_YEARS = 3;
+
+  /**
+   * 从**今天**开始按期望年化复利外推，并给出 ±1σ 带。
+   * 为什么不画在历史净值图上：历史图的横轴是 2016→今，把「期望」画在那儿
+   * 等于假设用户 2016 年就入场了 —— 而人是从现在开始做的。
+   */
+  function drawProjection(host, opts) {
+    var W = hostWidth(host, 660), H = opts.height || 220;
+    var pad = { l: 70, r: 18, t: 18, b: 26 };
+    var capital = opts.capital || 1000000;
+    var mu = opts.annual || 0.1;
+    var sigma = Math.max(0.0001, opts.vol || 0.1);
+    var years = opts.years || 3;
+    var start = opts.start ? new Date(opts.start) : new Date();
+    if (isNaN(start.getTime())) start = new Date();
+
+    var pts = [], lo = [], hi = [];
+    for (var m = 0; m <= Math.round(years * 12); m++) {
+      var t = m / 12;
+      var d = new Date(start.getTime());
+      d.setMonth(d.getMonth() + m);
+      var mid = capital * Math.pow(1 + mu, t);
+      var band = Math.exp(sigma * Math.sqrt(t));
+      pts.push({ x: d.toISOString().slice(0, 10), y: mid });
+      lo.push({ x: pts[pts.length - 1].x, y: mid / band });
+      hi.push({ x: pts[pts.length - 1].x, y: mid * band });
+    }
+
+    var svg = makeSvg(host, W, H, "从现在起的期望路径");
+    var loV = Math.min.apply(null, lo.map(function (p) { return p.y; }));
+    var hiV = Math.max.apply(null, hi.map(function (p) { return p.y; }));
+    var padY = (hiV - loV) * 0.08;
+    var y0 = loV - padY, y1 = hiV + padY;
+    var iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+    function X(i) { return pad.l + iw * i / (pts.length - 1); }
+    function Y(v) { return pad.t + ih - ih * (v - y0) / (y1 - y0); }
+
+    var ticks = niceTicks(y0, y1, 4);
+    for (var ti = 0; ti < ticks.length; ti++) {
+      var yv = Y(ticks[ti]);
+      svg.appendChild(svgEl("line", { x1: pad.l, x2: pad.l + iw, y1: yv, y2: yv, class: "grid-line" }));
+      var lb = svgEl("text", { x: pad.l - 8, y: yv + 3.5, "text-anchor": "end" });
+      lb.setAttribute("class", "axis");
+      lb.textContent = fmtAxis(ticks[ti]);
+      svg.appendChild(lb);
+    }
+
+    // ±1σ 带
+    var bandPath = "M" + X(0).toFixed(2) + " " + Y(hi[0].y).toFixed(2);
+    for (var a = 1; a < hi.length; a++) bandPath += " L" + X(a).toFixed(2) + " " + Y(hi[a].y).toFixed(2);
+    for (var b = lo.length - 1; b >= 0; b--) bandPath += " L" + X(b).toFixed(2) + " " + Y(lo[b].y).toFixed(2);
+    bandPath += " Z";
+    svg.appendChild(svgEl("path", { d: bandPath, fill: COLORS.accent, opacity: "0.14", stroke: "none" }));
+
+    // 期望线
+    var line = "M" + X(0).toFixed(2) + " " + Y(pts[0].y).toFixed(2);
+    for (var c = 1; c < pts.length; c++) line += " L" + X(c).toFixed(2) + " " + Y(pts[c].y).toFixed(2);
+    svg.appendChild(svgEl("path", { d: line, fill: "none", stroke: COLORS.accent, "stroke-width": "1.8",
+                                    "stroke-dasharray": "6 4" }));
+
+    // x 轴：按年打点
+    for (var yIdx = 0; yIdx <= years; yIdx++) {
+      var idx = Math.min(pts.length - 1, yIdx * 12);
+      var tx = svgEl("text", { x: X(idx), y: H - 6, "text-anchor": "middle" });
+      tx.setAttribute("class", "axis");
+      tx.textContent = pts[idx].x.slice(0, 7);
+      svg.appendChild(tx);
+    }
+
+    // 终点标注
+    var endTxt = svgEl("text", { x: pad.l + iw, y: Y(pts[pts.length - 1].y) - 8, "text-anchor": "end",
+                                fill: COLORS.accent, "font-size": "10" });
+    endTxt.textContent = "期望 " + money(pts[pts.length - 1].y);
+    svg.appendChild(endTxt);
+    var bandTxt = svgEl("text", { x: pad.l + iw, y: Y(hi[hi.length - 1].y) - 6, "text-anchor": "end",
+                                 fill: "#8a8a99", "font-size": "9.5" });
+    bandTxt.textContent = "±1σ " + money(lo[lo.length - 1].y) + " ~ " + money(hi[hi.length - 1].y);
+    svg.appendChild(bandTxt);
+
+    // 悬停读数
+    var cross = svgEl("line", { x1: 0, x2: 0, y1: pad.t, y2: pad.t + ih, stroke: "#5b8cff",
+                                "stroke-width": "1", "stroke-dasharray": "3 3", opacity: "0" });
+    svg.appendChild(cross);
+    var dot = svgEl("circle", { r: "3.2", fill: COLORS.accent, opacity: "0" });
+    svg.appendChild(dot);
+    var hit = svgEl("rect", { x: pad.l, y: pad.t, width: iw, height: ih, fill: "transparent" });
+    if (hit.style) hit.style.cursor = "crosshair";
+    svg.appendChild(hit);
+    if (hit.addEventListener) {
+      hit.addEventListener("mousemove", function (ev) {
+        var box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { left: 0, width: W };
+        var bw = box.width || W;
+        var scale = W / bw;
+        var ratio = iw > 0 ? ((ev.clientX - box.left) * scale - pad.l) / iw : 0;
+        ratio = Math.max(0, Math.min(1, ratio));
+        var idx2 = Math.round(ratio * (pts.length - 1));
+        cross.setAttribute("x1", X(idx2)); cross.setAttribute("x2", X(idx2)); cross.setAttribute("opacity", "1");
+        dot.setAttribute("cx", X(idx2)); dot.setAttribute("cy", Y(pts[idx2].y)); dot.setAttribute("opacity", "1");
+        var cssX = Math.max(66, Math.min(bw - 66, X(idx2) / scale));
+        tip(host, pts[idx2].x + "　期望 " + money(pts[idx2].y) +
+          "　±1σ " + money(lo[idx2].y) + " ~ " + money(hi[idx2].y), cssX, 14);
+      });
+      hit.addEventListener("mouseleave", function () {
+        cross.setAttribute("opacity", "0"); dot.setAttribute("opacity", "0"); tip(host, null);
+      });
+    }
+  }
+
+  /** 用「资金与预期」里的参数 + 回测的实际波动，画出从今天起的期望路径。 */
+  function renderProjection(run) {
+    var host = document.getElementById("proj");
+    var note = document.getElementById("projnote");
+    if (!host) return;
+    var m = (run && run.metrics) || {};
+    var vol = (m.ann_vol_pct || 0) / 100;
+    if (!(vol > 0)) vol = 0.10;
+    var today = new Date();
+    drawProjection(host, {
+      capital: PARAMS.capital,
+      annual: (PARAMS.target || 0) / 100,
+      vol: vol,
+      years: PROJ_YEARS,
+      start: today.toISOString().slice(0, 10),
+    });
+    if (note) {
+      var endVal = PARAMS.capital * Math.pow(1 + (PARAMS.target || 0) / 100, PROJ_YEARS);
+      note.textContent = "起点 = 今天（" + today.toISOString().slice(0, 10) + "），投入 " + money(PARAMS.capital) +
+        "，按期望年化 " + PARAMS.target + "% 复利 " + PROJ_YEARS + " 年 → " + money(endVal) + "。" +
+        " 阴影是按回测实际波动（" + (vol * 100).toFixed(2) + "%）算的 ±1σ 区间。" +
+        " 它只覆盖「日常波动」这一种不确定性：策略失效、参数漂移、换手成本估偏都不在里面，" +
+        "所以真实结果会比这条带子宽得多——别把它当预测，它只是让你别只盯一条漂亮的直线。";
+    }
+  }
   /* ================= 多序列折线（累计盈亏）：替代原来的数字表 ================= */
 
   var SLEEVE_COLORS = ["#4f8cff", "#f0b429", "#38b48b", "#c96bd8", "#e2703a"];
@@ -2104,6 +2250,22 @@
     }).catch(function (e) { simMsg('停止失败：' + String(e), 'bad-text') });
   });
 
+  (function bindProjTabs() {
+    var btns = typeof document.querySelectorAll === 'function'
+      ? document.querySelectorAll('.proj-btn') : [];
+    for (var i = 0; i < btns.length; i++) {
+      (function (btn) {
+        btn.addEventListener('click', function () {
+          var y = parseInt(btn.getAttribute('data-proj'), 10) || 3;
+          PROJ_YEARS = y;
+          for (var k = 0; k < btns.length; k++) btns[k].className = 'tabbtn proj-btn';
+          btn.className = 'tabbtn proj-btn on';
+          renderProjection(LAST_RUN);
+        });
+      })(btns[i]);
+    }
+  })();
+
   (function bindIntradayTabs() {
     var ret = document.getElementById('intraday-returns');
     var eq = document.getElementById('intraday-equity');
@@ -2135,6 +2297,7 @@
     // 图是按容器真实像素画的：窗口一变就必须重画，否则会被 CSS 拉伸变形（这正是之前的毛病）
     if (LAST_CURVE && LAST_CURVE.length) drawCurve(LAST_CURVE);
     renderExpectation(LAST_RUN);
+    renderProjection(LAST_RUN);
     if (LAST_RUN) {
       renderAttribution(LAST_RUN);
       if (LAST_RUN.model && LAST_RUN.model.latest) renderModel(LAST_RUN.model.latest, LAST_RUN.model.series || []);
@@ -2208,7 +2371,7 @@
   window.__dshQuantCtaCharts = {
     drawLine: drawLine, drawDonut: drawDonut, drawBars: drawBars, drawSectorBars: drawSectorBars,
     drawMultiLine: drawMultiLine, cumSeries: cumSeries, drawWeightHeat: drawWeightHeat,
-    renderNoModel: renderNoModel,
+    renderNoModel: renderNoModel, drawProjection: drawProjection, renderProjection: renderProjection,
     zoomState: zoomState, windowPositions: windowPositions,
     niceTicks: niceTicks, colorMap: colorMap, sectorColor: sectorColor, constraintsText: constraintsText,
     fmtAxis: fmtAxis, lttb: lttb, timeTicks: timeTicks, rollingVol: rollingVol, hostWidth: hostWidth,
