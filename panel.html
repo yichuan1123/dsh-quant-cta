@@ -704,13 +704,13 @@
     });
   }
 
-  /** 把后端给的东西变成一句能照着做的话（绝不出现「未知错误」）。 */
-  function explain(d, fallback) {
-    if (!d) return fallback + '：响应为空';
+  /** 把后端给的东西变成一句能照着做的话（绝不出现「未知错误」，也不叠加前缀）。 */
+  function explain(d) {
+    if (!d) return '响应为空';
     if (d.error) return d.error;
     var keys = Object.keys(d);
-    if (keys.length === 0) return fallback + '：后端返回了空对象（宿主端可能是旧版本，重启 DSH 再试）';
-    return fallback + '：' + JSON.stringify(d).slice(0, 300);
+    if (keys.length === 0) return '后端返回了空对象（宿主端可能是旧版本，重启 DSH 再试）';
+    return JSON.stringify(d).slice(0, 300);
   }
 
   /**
@@ -729,7 +729,7 @@
       .then(function (d) {
         if (!d.ok) {
           credBusy(false);
-          credMsg('保存失败：' + explain(d, '保存失败'), 'bad-text');
+          credMsg('保存失败：' + explain(d), 'bad-text');
           return;
         }
         document.getElementById('creduser').value = '';
@@ -743,7 +743,7 @@
               credMsg('已保存并验证通过：' + p.symbol + ' 最新价 ' + p.last_price + '（' + p.checked_at + '）', 'ok-text');
             } else {
               credMsg('账号已保存（' + (d.status && d.status.masked_user ? d.status.masked_user : '') +
-                '），但连通测试未通过：' + explain(p, '连通失败') +
+                '），但连通测试未通过：' + explain(p) +
                 ' —— 账号密码不对、或网络受限；可点「仅测试」重试。', 'bad-text');
             }
           });
@@ -763,7 +763,7 @@
       .then(function (d) {
         credBusy(false);
         if (d.ok) credMsg('连通 OK：' + d.symbol + ' 最新价 ' + d.last_price, 'ok-text');
-        else credMsg('连通失败：' + explain(d, '连通失败'), 'bad-text');
+        else credMsg('连通失败：' + explain(d), 'bad-text');
       })
       .catch(function (e) { credBusy(false); credMsg('请求失败：' + (e && e.message ? e.message : String(e)), 'bad-text') });
   });
