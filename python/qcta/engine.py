@@ -211,7 +211,8 @@ class Backtester:
             for s in sleeves:
                 prices = {c: (self.index.get(c, {}).get(last).close if self.index.get(c, {}).get(last) else 0.0)
                           for c in list(s.account.positions.keys())}
-                s.account.close_all(prices, last, self.specs, self.cfg.slip_ticks)
+                s.account.close_all(prices, last, self.specs,
+                                    self.cfg.slip_by_symbol or self.cfg.slip_ticks)
         if aggregate:
             # 总权益与各腿曲线必须同时对齐到「收尾之后」的状态，
             # 否则分腿归因加起来对不上 headline（差的就是强平成本）。
@@ -357,7 +358,8 @@ class Backtester:
             d_dir = int(d[0]) if d else 0
             d_lots = int(d[1]) if d else 0
 
-            slip = self.cfg.slip_ticks * spec.tick
+            slip = (self.cfg.slip_by_symbol.get(code, self.cfg.slip_ticks)
+                    if self.cfg.slip_by_symbol else self.cfg.slip_ticks) * spec.tick
 
             def buy(lots, reason):
                 acct.fill(code, spec, +1, lots, bar.open + slip, bar.open, date, slip * spec.multiplier * lots, reason=reason)

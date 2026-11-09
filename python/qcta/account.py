@@ -166,14 +166,15 @@ class Account:
             if spec is not None:
                 pos.margin = spec.margin(pos.lots, price)
 
-    def close_all(self, prices, date: str, spec_table, slip_ticks: float, reason: str = "liquidate"):
+    def close_all(self, prices, date: str, spec_table, slip_ticks, reason: str = "liquidate"):
         for code in list(self.positions.keys()):
             pos = self.positions[code]
             spec = spec_table[code]
             ref = prices.get(code, pos.last_price)
             if ref <= 0:
                 continue
-            slip = slip_ticks * spec.tick
+            n = slip_ticks.get(code, 1.0) if isinstance(slip_ticks, dict) else slip_ticks
+            slip = n * spec.tick
             # 平多 => 卖出，价格下滑点；平空 => 买入，价格上滑点
             price = ref - slip if pos.direction > 0 else ref + slip
             self.fill(code, spec, -pos.direction, pos.lots, price, ref, date,

@@ -117,7 +117,8 @@ class EngineConfig:
     initial_capital: float = 1_000_000.0
     target_vol: float = 0.10                # 组合年化目标波动
     atr_period: int = 20
-    slip_ticks: float = 1.0                 # 每笔滑点（跳）
+    slip_ticks: float = 1.0                 # 每笔滑点（跳），未在 slip_by_symbol 里指定的品种用它
+    slip_by_symbol: dict = field(default_factory=dict)   # {code: 跳数}，按品种估的真实滑点
     max_leverage: float = 1.5               # 名义敞口/权益 上限
     max_drawdown_halt: float = 0.20         # 超过即停止开新仓
     max_symbol_risk: float = 0.02           # 单品种最大风险占权益

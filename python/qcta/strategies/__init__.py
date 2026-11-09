@@ -6,12 +6,14 @@
 - 不出现的日期表示「不调仓，维持现状」
 """
 
+from .carry import CarrySector
 from .trend import DonchianTrend
 from .xsec import CrossSectionMomentum
 
 STRATEGIES = {
     "trend": DonchianTrend,
     "xsec": CrossSectionMomentum,
+    "carry": CarrySector,
 }
 
 

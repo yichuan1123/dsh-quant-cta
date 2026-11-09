@@ -282,3 +282,51 @@ lots        = floor( per_symbol / (ATR_i · multiplier_i) )
 - Maillard, S., Roncalli, T., Teïletche, J. (2010). *The Properties of Equally Weighted Risk Contribution Portfolios*.
 - Bollerslev, T. (1986). *Generalized Autoregressive Conditional Heteroskedasticity*.
 - Peng, C.-K. et al. (1994). *Mosaic Organization of DNA Nucleotides*（DFA 原始文献）.
+
+## 11. 趋势强度：ADX（Wilder）
+
+ADX 衡量「趋势有多强」，与方向无关：
+
+```
+TR_t   = max(H_t−L_t, |H_t−C_{t−1}|, |L_t−C_{t−1}|)
++DM_t  = H_t−H_{t−1}  若 > L_{t−1}−L_t 且 > 0，否则 0
+−DM_t  = L_{t−1}−L_t  若 > H_t−H_{t−1} 且 > 0，否则 0
+平滑（Wilder，α=1/n）：ATR, +DMS, −DMS
++DI = 100·+DMS/ATR      −DI = 100·−DMS/ATR
+DX  = 100·|+DI − −DI| / (+DI + −DI)
+ADX = Wilder 平均(DX, n)
+```
+
+口径提醒：ADX 是**平滑过的滞后量**，描述「过去已经有多趋势」，不是「接下来会趋势」。
+所以它只适合当过滤器（弱趋势时不建新仓），不适合当入场信号。
+25/20 是通行经验阈值，不是分界真理——本项目实测 18 比 22/26/30 好，且非单调，
+这本身就是「阈值效应来自噪声」的证据（见 [SWEEP.md](SWEEP.md)）。
+
+工程细节：本项目把「反手信号」在弱趋势下退化成「只离场」。
+趋势策略原本永远在场（止损反手），加过滤后允许空仓——更保守，也避免在震荡里被来回打脸两次。
+
+## 12. 展期收益的恒等式（以及为什么它在天勤上走不通）
+
+主连是多个合约的拼接。设不复权主连价格为 p、前复权主连为 a，则
+
+```
+a_t = p_t · k_t，  k_t 只在换月日跳一次
+e_d = (p_d/p_{d−1}) / (a_d/a_{d−1}) = k_{d−1}/k_d
+展期收益（多头口径）= −ln(e_d) × 365 / Δt
+```
+
+正值 = backwardation（近月贵、远月便宜，多头换月收钱），负值 = contango。
+
+**但这在天勤上不成立**：实测 KQ.m@SHFE.rb 在 adj_type=None 与 adj_type='F' 下
+返回 **2633 天逐点相同**的序列——主连本身就是处理过换月的合成序列，复权参数是空操作。
+拿不到「原始跳空」，这条恒等式就没有输入。
+
+正确做法是合约级数据：每个交易日取最近到期的两个合约，
+
+```
+carry = ln(P_near/P_far) × 365 / (T_far − T_near)
+```
+
+实现见 python/qcta/carry.py（carry_series）与 tools/term_build.py。
+单品种试点（rb，34 个合约、2634 天）已跑通：年化 carry 均值 +7.1%，64% 的交易日处于 backwardation。
+横截面组合需要 6-8 个以上品种的合约数据，当前受限于天勤登录的不稳定（详见 SWEEP 的「卡住」一节）。

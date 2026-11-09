@@ -458,6 +458,76 @@ def _adj_candidates():
     return ("F", "B", None)
 
 
+PROXY_URL = "http://127.0.0.1:7897"
+
+
+def _tqapi_with_timeout(TqApi, TqAuth, cred, timeout_s: float = 45.0):
+    """在后台线程里建连，超时就放弃这次尝试。
+
+    `TqApi()` 内部要建 WebSocket；网络半通时它会**无限期**阻塞（实测卡过 6 分钟没动静），
+    重试策略形同虚设。用线程 + join 超时把它变成可放弃的一次尝试。
+    """
+    import threading
+
+    box = {}
+
+    def work():
+        try:
+            box["api"] = TqApi(auth=TqAuth(cred[0], cred[1]))
+        except BaseException as exc:      # 线程里只能自己兜住
+            box["err"] = exc
+
+    th = threading.Thread(target=work, name="tqapi-open", daemon=True)
+    th.start()
+    th.join(timeout_s)
+    if th.is_alive():
+        raise TqSdkError("建立天勤连接超时（%.0fs 未完成）" % timeout_s)
+    if "err" in box:
+        raise box["err"]
+    return box["api"]
+
+
+def open_api(cred=None, attempts: int = 8):
+    """开一个 TqApi，带重试。
+
+    天勤的登录请求偶尔会被服务端直接掐断 TLS（SSLError: EOF occurred in violation
+    of protocol），而 tqsdk 自己不重试——一次瞬断就整批拉取失败。这里交替「直连 / 本地代理」
+    重试，并把最后一次异常原样抛出。
+    """
+    cred = cred or _require_credentials()
+    try:
+        from tqsdk import TqApi, TqAuth  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        raise TqSdkError("未安装 tqsdk（pip install tqsdk）：%s" % exc)
+
+    saved = {k: os.environ.get(k) for k in ("HTTPS_PROXY", "HTTP_PROXY")}
+    last = None
+    try:
+        for i in range(attempts):
+            # 实测：到 auth.shinnytech.com 的 TLS 握手丢包严重（直连约 3/8 通、走本地代理约 5/8 通），
+            # 而且失败是成簇的。所以交替两条路径 + 递增退避 + 随机抖动，别在同一个坏窗口里死磕。
+            use_proxy = i % 2 == 0
+            if use_proxy:
+                os.environ["HTTPS_PROXY"] = PROXY_URL
+                os.environ["HTTP_PROXY"] = PROXY_URL
+            else:
+                os.environ.pop("HTTPS_PROXY", None)
+                os.environ.pop("HTTP_PROXY", None)
+            try:
+                api = _tqapi_with_timeout(TqApi, TqAuth, cred, timeout_s=25)
+                return api
+            except Exception as exc:      # 网络层异常类型很多，统一兜住重试
+                last = exc
+                _time.sleep(0.8 + i * 0.6 + random.random() * 0.7)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    raise TqSdkError("天勤登录连续失败 %d 次：%s" % (attempts, last))
+
+
 def fetch_tqsdk_many(codes, data_length: int = 3000):
     """**一次登录**拉多个品种的主连日线。
 
@@ -467,12 +537,7 @@ def fetch_tqsdk_many(codes, data_length: int = 3000):
     返回 {code: {"bars": [...], "adj": "F"}}，失败品种带 "error"。
     """
     cred = _require_credentials()
-    try:
-        from tqsdk import TqApi, TqAuth  # type: ignore
-    except Exception as exc:  # pragma: no cover - 环境相关
-        raise TqSdkError("未安装 tqsdk（pip install tqsdk）：%s" % exc)
-
-    api = TqApi(auth=TqAuth(cred[0], cred[1]))
+    api = open_api(cred)
     out = {}
     try:
         serials = {}
@@ -510,6 +575,44 @@ def fetch_tqsdk_many(codes, data_length: int = 3000):
                 out[code] = {"error": "天勤返回空数据（品种 %s）" % code}
             else:
                 out[code] = {"bars": bars, "adj": adjs.get(code)}
+    finally:
+        try:
+            api.close()
+        except Exception:
+            pass
+    return out
+
+
+def fetch_tqsdk_series(tq_symbols, period_seconds: int = 86400, data_length: int = 3000, adj="F"):
+    """订阅任意天勤代码（合约、指数、分钟线），返回 {symbol: {"bars": [...], "error": ...}}。
+
+    `fetch_tqsdk_many` 是「按品种池拉主连日线」的专用路径；这个是通用口，
+    期限结构（具体合约）和滑点估计（分钟线）都走它。
+    """
+    cred = _require_credentials()
+    api = open_api(cred)
+    out = {}
+    try:
+        serials = {}
+        for sym in tq_symbols:
+            try:
+                serials[sym] = api.get_kline_serial(sym, period_seconds,
+                                                    data_length=data_length, adj_type=adj)
+            except TypeError:
+                serials[sym] = api.get_kline_serial(sym, period_seconds, data_length=data_length)
+            except Exception as exc:
+                out[sym] = {"error": "%s: %s" % (type(exc).__name__, str(exc)[:100])}
+        budget = _time.time() + 20.0
+        while serials and _time.time() < budget:
+            if all(len(s) > 0 for s in serials.values()):
+                break
+            try:
+                api.wait_update(deadline=min(budget, _time.time() + 1.0))
+            except TypeError:
+                break
+        for sym, serial in serials.items():
+            bars = _serial_to_bars(serial)
+            out[sym] = {"bars": bars} if bars else {"error": "空数据"}
     finally:
         try:
             api.close()

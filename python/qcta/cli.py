@@ -238,7 +238,7 @@ def cmd_data(args):
             sys.stderr.write("正在从天勤拉取 %d 个品种（一次登录批量订阅）…\n" % len(codes))
             sys.stderr.flush()
         try:
-            fetched = fetch_tqsdk_many(codes)
+            fetched = fetch_tqsdk_many(codes, data_length=getattr(args, "bars", 0) or 3000)
         except TqSdkError as exc:
             return _emit({"ok": False, "error": str(exc)}, args.json, lambda p: p["error"])
         for code in codes:
@@ -323,24 +323,40 @@ def cmd_optimize(args):
 
 # ───────────────────────────── backtest ─────────────────────────────
 
+def _slip_config(args):
+    """--slip auto 时读 data/costs.json（逐品种），否则用全局固定跳数。"""
+    raw = str(getattr(args, "slip", "1.0") or "1.0").strip().lower()
+    if raw == "auto":
+        from .costs import load_costs, slip_map
+        table = load_costs()
+        if not table:
+            raise SystemExit("没有 data/costs.json，先跑 python tools/costs.py --live --write")
+        return 1.0, slip_map(table)
+    return float(raw), {}
+
+
 def _config_from_args(args):
     sleeves = parse_sleeves(args.sleeves)
     te = int(getattr(args, "trend_entry", 0) or 0)
     tx = int(getattr(args, "trend_exit", 0) or 0)
-    if te or tx:
+    adx_min = float(getattr(args, "adx", 0) or 0)
+    if te or tx or adx_min:
         for s in sleeves:
             if s["strategy"] == "trend":
                 if te:
                     s["kwargs"]["entry"] = te
                 if tx:
                     s["kwargs"]["exit"] = tx
+                if adx_min:
+                    s["kwargs"]["adx_min"] = adx_min
     return EngineConfig(
         start_date=args.start,
         end_date=args.end or "",
         initial_capital=args.capital,
         target_vol=args.vol,
         atr_period=args.atr,
-        slip_ticks=args.slip,
+        slip_ticks=_slip_config(args)[0],
+        slip_by_symbol=_slip_config(args)[1],
         max_leverage=args.leverage,
         max_drawdown_halt=args.dd_halt,
         max_symbol_risk=args.symbol_risk,
@@ -547,6 +563,7 @@ def build_parser():
     dd.add_argument("action", choices=["status", "sync"])
     dd.add_argument("--pool", default="default")
     dd.add_argument("--live", action="store_true", help="从天勤拉取（需要快期账号）")
+    dd.add_argument("--bars", type=int, default=3000, help="每个品种拉多少根日线（默认 3000 ≈ 12 年）")
     dd.add_argument("--json", action="store_true")
     dd.set_defaults(func=cmd_data)
 
@@ -557,7 +574,10 @@ def build_parser():
     b.add_argument("--capital", type=float, default=1_000_000.0)
     b.add_argument("--vol", type=float, default=0.10, help="组合目标年化波动")
     b.add_argument("--atr", type=int, default=20)
-    b.add_argument("--slip", type=float, default=1.0, help="每笔滑点（跳）")
+    b.add_argument("--slip", default="1.0",
+                   help="每笔滑点（跳）：数字=全局固定；auto=用 data/costs.json 的逐品种估计")
+    b.add_argument("--adx", type=float, default=0.0,
+                   help="ADX 强度过滤阈值（0=关；18-25 是常用区间），弱趋势只离场不反手")
     b.add_argument("--leverage", type=float, default=1.5)
     b.add_argument("--dd-halt", dest="dd_halt", type=float, default=0.20)
     b.add_argument("--symbol-risk", dest="symbol_risk", type=float, default=0.02)

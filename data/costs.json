@@ -1,0 +1,285 @@
+{
+ "note": "由 tools/costs.py 生成，方法见 python/qcta/costs.py 顶部",
+ "symbols": {
+  "CF": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 18790935900.0,
+   "median_range_ticks": 41.0,
+   "days": 2633,
+   "tick_value": 25,
+   "illiquid": false
+  },
+  "FG": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 18847112760.0,
+   "median_range_ticks": 31.0,
+   "days": 2633,
+   "tick_value": 20,
+   "illiquid": false
+  },
+  "IC": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread_capped",
+   "spread_ticks": 22.0,
+   "median_amount": 59187779680.0,
+   "median_range_ticks": 479.0,
+   "days": 2633,
+   "tick_value": 40.0,
+   "illiquid": false
+  },
+  "IF": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread_capped",
+   "spread_ticks": 9.0,
+   "median_amount": 72725305440.0,
+   "median_range_ticks": 265.0,
+   "days": 2633,
+   "tick_value": 60.0,
+   "illiquid": false
+  },
+  "IH": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread_capped",
+   "spread_ticks": 5.0,
+   "median_amount": 24776449200.0,
+   "median_range_ticks": 181.0,
+   "days": 2633,
+   "tick_value": 60.0,
+   "illiquid": false
+  },
+  "IM": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread_capped",
+   "spread_ticks": 23.0,
+   "median_amount": 116868358080.0,
+   "median_range_ticks": 571.0,
+   "days": 1041,
+   "tick_value": 40.0,
+   "illiquid": false
+  },
+  "MA": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread",
+   "spread_ticks": 3.0,
+   "median_amount": 21305259990.0,
+   "median_range_ticks": 53.0,
+   "days": 2633,
+   "tick_value": 10,
+   "illiquid": false
+  },
+  "SR": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 16518897960.0,
+   "median_range_ticks": 59.0,
+   "days": 2633,
+   "tick_value": 10,
+   "illiquid": false
+  },
+  "T": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 54557061300.0,
+   "median_range_ticks": 45.0,
+   "days": 2633,
+   "tick_value": 50.0,
+   "illiquid": false
+  },
+  "TA": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread",
+   "spread_ticks": 2.0,
+   "median_amount": 23254914400.0,
+   "median_range_ticks": 46.0,
+   "days": 2633,
+   "tick_value": 10,
+   "illiquid": false
+  },
+  "ag": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread_capped",
+   "spread_ticks": 6.0,
+   "median_amount": 41488106850.0,
+   "median_range_ticks": 82.0,
+   "days": 2633,
+   "tick_value": 15,
+   "illiquid": false
+  },
+  "al": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 12653594100.0,
+   "median_range_ticks": 43.0,
+   "days": 2633,
+   "tick_value": 25,
+   "illiquid": false
+  },
+  "au": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread_capped",
+   "spread_ticks": 10.0,
+   "median_amount": 47502966700.0,
+   "median_range_ticks": 167.0,
+   "days": 2633,
+   "tick_value": 20.0,
+   "illiquid": false
+  },
+  "c": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 8960997500.0,
+   "median_range_ticks": 21.0,
+   "days": 2633,
+   "tick_value": 10,
+   "illiquid": false
+  },
+  "cu": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread",
+   "spread_ticks": 2.0,
+   "median_amount": 30342297000.0,
+   "median_range_ticks": 70.0,
+   "days": 2633,
+   "tick_value": 50,
+   "illiquid": false
+  },
+  "hc": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 13591691820.0,
+   "median_range_ticks": 65.0,
+   "days": 2633,
+   "tick_value": 10,
+   "illiquid": false
+  },
+  "i": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 44409932400.0,
+   "median_range_ticks": 38.0,
+   "days": 2633,
+   "tick_value": 50.0,
+   "illiquid": false
+  },
+  "j": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread",
+   "spread_ticks": 2.0,
+   "median_amount": 12696657550.0,
+   "median_range_ticks": 114.0,
+   "days": 2633,
+   "tick_value": 50.0,
+   "illiquid": false
+  },
+  "jm": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread",
+   "spread_ticks": 2.0,
+   "median_amount": 10668821580.0,
+   "median_range_ticks": 81.0,
+   "days": 2633,
+   "tick_value": 30.0,
+   "illiquid": false
+  },
+  "m": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 28564145190.0,
+   "median_range_ticks": 46.0,
+   "days": 2633,
+   "tick_value": 10,
+   "illiquid": false
+  },
+  "ni": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread_capped",
+   "spread_ticks": 4.0,
+   "median_amount": 29077975545.0,
+   "median_range_ticks": 243.0,
+   "days": 2632,
+   "tick_value": 10,
+   "illiquid": false
+  },
+  "p": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread",
+   "spread_ticks": 2.0,
+   "median_amount": 46123823640.0,
+   "median_range_ticks": 66.0,
+   "days": 2633,
+   "tick_value": 20,
+   "illiquid": false
+  },
+  "rb": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 60028453380.0,
+   "median_range_ticks": 65.0,
+   "days": 2633,
+   "tick_value": 10,
+   "illiquid": false
+  },
+  "ru": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread",
+   "spread_ticks": 2.0,
+   "median_amount": 37503496250.0,
+   "median_range_ticks": 53.0,
+   "days": 2633,
+   "tick_value": 50,
+   "illiquid": false
+  },
+  "sc": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread_capped",
+   "spread_ticks": 5.0,
+   "median_amount": 60054968400.0,
+   "median_range_ticks": 118.0,
+   "days": 2091,
+   "tick_value": 100.0,
+   "illiquid": false
+  },
+  "v": {
+   "slip_ticks": 2.0,
+   "method": "minute_spread",
+   "spread_ticks": 3.0,
+   "median_amount": 14813063915.0,
+   "median_range_ticks": 105.0,
+   "days": 2633,
+   "tick_value": 5,
+   "illiquid": false
+  },
+  "y": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.5,
+   "median_amount": 27661399040.0,
+   "median_range_ticks": 53.0,
+   "days": 2633,
+   "tick_value": 20,
+   "illiquid": false
+  },
+  "zn": {
+   "slip_ticks": 1.0,
+   "method": "minute_spread",
+   "spread_ticks": 1.0,
+   "median_amount": 18024426000.0,
+   "median_range_ticks": 68.0,
+   "days": 2633,
+   "tick_value": 25,
+   "illiquid": false
+  }
+ }
+}
