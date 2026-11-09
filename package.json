@@ -1,6 +1,6 @@
 {
   "name": "dsh-quant-cta",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "商品期货 CTA 工作台：真实行情（天勤 TqSdk）驱动的研究、回测、模拟盘全链路，含成本模型与风控。不发任何真实委托。",
   "type": "module",
   "main": "lib/index.js",

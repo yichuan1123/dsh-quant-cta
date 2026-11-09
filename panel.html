@@ -498,42 +498,68 @@
     });
   }
 
+  /** 把后端给的东西变成一句能照着做的话（绝不出现「未知错误」）。 */
+  function explain(d, fallback) {
+    if (!d) return fallback + '：响应为空';
+    if (d.error) return d.error;
+    var keys = Object.keys(d);
+    if (keys.length === 0) return fallback + '：后端返回了空对象（宿主端可能是旧版本，重启 DSH 再试）';
+    return fallback + '：' + JSON.stringify(d).slice(0, 300);
+  }
+
+  /**
+   * 两步走：① 只落盘（不联网，秒回）② 再单独测连通（要联网，可能几十秒）。
+   *
+   * 之前是一步「保存并测试」：验证那步一旦超时或异常，整次保存就变成一句
+   * 「未知错误」，既不知道存没存成功，也不知道失败在哪。
+   */
   document.getElementById('credsave').addEventListener('click', function () {
     var user = document.getElementById('creduser').value.trim();
     var pass = document.getElementById('credpass').value;
     if (!user || !pass) { credMsg('账号和密码都要填。', 'bad-text'); return; }
     credBusy(true);
-    credMsg('正在保存并测试连通性（最多 90 秒）…');
-    postCred('/dsh-quant-cta/api/credentials', { user: user, password: pass, verify: true })
+    credMsg('正在保存到本机…');
+    postCred('/dsh-quant-cta/api/credentials', { user: user, password: pass })
       .then(function (d) {
-        credBusy(false);
-        if (!d.ok) { credMsg('保存失败：' + (d.error || '未知错误'), 'bad-text'); return }
+        if (!d.ok) {
+          credBusy(false);
+          credMsg('保存失败：' + explain(d, '保存失败'), 'bad-text');
+          return;
+        }
         document.getElementById('creduser').value = '';
         document.getElementById('credpass').value = '';
         renderCredStatus(d.status);
-        var p = d.probe || {};
-        if (p.ok) {
-          credMsg('已保存并验证通过：' + p.symbol + ' 最新价 ' + p.last_price + '（' + p.checked_at + '）', 'ok-text');
-        } else {
-          credMsg('账号已保存，但连通性测试未通过：' + (p.error || '未知原因') +
-            ' —— 账号可能不对，或是网络受限；可以点「仅测试」重试。', 'bad-text');
-        }
+        credMsg('已保存。正在测试连通性（最多 90 秒）…');
+        return postCred('/dsh-quant-cta/api/credentials/test', {})
+          .then(function (p) {
+            credBusy(false);
+            if (p.ok) {
+              credMsg('已保存并验证通过：' + p.symbol + ' 最新价 ' + p.last_price + '（' + p.checked_at + '）', 'ok-text');
+            } else {
+              credMsg('账号已保存（' + (d.status && d.status.masked_user ? d.status.masked_user : '') +
+                '），但连通测试未通过：' + explain(p, '连通失败') +
+                ' —— 账号密码不对、或网络受限；可点「仅测试」重试。', 'bad-text');
+            }
+          });
       })
-      .catch(function (e) { credBusy(false); credMsg('请求失败：' + String(e), 'bad-text') });
+      .catch(function (e) { credBusy(false); credMsg('请求失败：' + (e && e.message ? e.message : String(e)), 'bad-text') });
   });
 
   document.getElementById('credtest').addEventListener('click', function () {
     var user = document.getElementById('creduser').value.trim();
     var pass = document.getElementById('credpass').value;
+    var body = {};
+    // 表单填了就测表单里的，没填就用已保存的（方便保存后再验证）
+    if (user && pass) { body.user = user; body.password = pass; }
     credBusy(true);
-    credMsg('正在测试连通性（最多 90 秒）…');
-    postCred('/dsh-quant-cta/api/credentials/test', { user: user, password: pass })
+    credMsg(body.user ? '正在测试连通性（最多 90 秒）…' : '正在用已保存的账号测试连通性（最多 90 秒）…');
+    postCred('/dsh-quant-cta/api/credentials/test', body)
       .then(function (d) {
         credBusy(false);
         if (d.ok) credMsg('连通 OK：' + d.symbol + ' 最新价 ' + d.last_price, 'ok-text');
-        else credMsg('连通失败：' + (d.error || '未知原因'), 'bad-text');
+        else credMsg('连通失败：' + explain(d, '连通失败'), 'bad-text');
       })
-      .catch(function (e) { credBusy(false); credMsg('请求失败：' + String(e), 'bad-text') });
+      .catch(function (e) { credBusy(false); credMsg('请求失败：' + (e && e.message ? e.message : String(e)), 'bad-text') });
   });
 
   document.getElementById('credclear').addEventListener('click', function () {

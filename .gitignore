@@ -11,6 +11,7 @@ runs/
 data/cache/
 state/
 credentials.json
+credentials*.bak
 .env
 
 # 预览产物（tools/make-preview.mjs 生成）
