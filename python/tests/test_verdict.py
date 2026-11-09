@@ -85,6 +85,18 @@ class AnalyzeTests(unittest.TestCase):
         self.assertAlmostEqual(v["win_rate_bayes"]["posterior_mean"], 31.0 / 42.0, places=9)
         self.assertGreater(v["prob_edge"], 0.5)
 
+    def test_flat_equity_reports_no_meaning(self):
+        eq = [1_000_000.0] * 60          # 全程没有建仓
+        v = verdict.analyze(eq, _dates(len(eq)), [])
+        self.assertIn("error", v)
+        self.assertIn("恒为 0", v["error"])
+
+    def test_degenerate_equity_never_raises(self):
+        # 前 15 天完全不动（还没建仓），之后跳一下：增广项共线，是真实会遇到的退化样本
+        eq = [1_000_000.0] * 15 + [1_000_000.0 * (1 + 0.001 * i) for i in range(1, 40)]
+        v = verdict.analyze(eq, _dates(len(eq)), [])
+        self.assertTrue("label" in v or "error" in v, v)
+
     def test_keys_present(self):
         eq = _trending()
         v = verdict.analyze(eq, _dates(len(eq)), [])

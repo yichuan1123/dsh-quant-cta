@@ -181,12 +181,15 @@ def adf(y, max_lag=None, regression="c"):
     滞后阶数按 AIC 在 0..max_lag 里选。
     """
     n = len(y)
-    if n < 20:
-        return {"stat": 0.0, "lags": 0, "n": n, "crit": ADF_CRIT[regression], "reject": False}
+    if n < 30:
+        # 样本太短时增广项会把自由度吃光，回归矩阵直接奇异——如实说算不了
+        return {"stat": 0.0, "lags": 0, "n": n, "crit": ADF_CRIT[regression],
+                "reject": False, "insufficient": True}
     dy = [y[t] - y[t - 1] for t in range(1, n)]
     if max_lag is None:
         max_lag = int(12 * (n / 100.0) ** 0.25)
-    max_lag = max(0, min(max_lag, len(dy) - 10))
+    # 经验上限：每个滞后阶大约吃掉 3 个自由度，至少留 12 个观测
+    max_lag = max(0, min(max_lag, (len(dy) - 12) // 3))
 
     best = None
     for lag in range(max_lag + 1):
@@ -205,7 +208,11 @@ def adf(y, max_lag=None, regression="c"):
             target.append(dy[t])
         if len(target) < len(rows[0]) + 5:
             continue
-        res = ols(target, rows)
+        try:
+            res = ols(target, rows)
+        except ValueError:
+            # 共线/奇异：这一阶跳过，换更小的滞后
+            continue
         k = len(rows[0])
         aic = res["n"] * math.log(max(res["sigma2"], 1e-300)) + 2 * k
         if best is None or aic < best["aic"]:

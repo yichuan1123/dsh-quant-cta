@@ -31,7 +31,21 @@ def analyze(equity, dates, trades, n_trials=1, level=0.95):
     if n < 20:
         out["error"] = "样本不足（少于 20 个交易日），统计量没有意义"
         return out
+    if all(abs(r) < 1e-12 for r in rets):
+        out["error"] = "样本内日收益恒为 0（策略全程没有建仓），统计体检没有意义"
+        return out
 
+    try:
+        _full_stats(out, equity, rets, trades, n_trials, level)
+    except Exception as exc:      # 退化样本不该让整份报告生不出来
+        return {"n_days": len(equity), "n_returns": n, "n_trades": len(trades),
+                "error": "统计体检在 %d 个样本上算不出来（%s: %s）"
+                         % (n, type(exc).__name__, exc)}
+    return out
+
+
+def _full_stats(out, equity, rets, trades, n_trials, level):
+    n = len(rets)
     out["sharpe"] = sig.psr(rets)
     # 无穷用 None 表示：JSON 里 Infinity 不是合法字面量，会让前端 JSON.parse 直接失败
     m = sig.min_track_record_length(rets)
@@ -65,7 +79,6 @@ def analyze(equity, dates, trades, n_trials=1, level=0.95):
     else:
         out["label"] = "与噪声不可区分（看不出正负）"
         out["label_level"] = "none"
-    return out
 
 
 def _pct(x, nd=2):
@@ -155,9 +168,12 @@ def render_markdown(v, n_trials=1):
     a("| Ljung-Box（收益自相关 q=%.1f, p=%.3f） | 一阶自相关 %+.3f | %s |" % (
         lb["q"], lb["p"], v.get("autocorr1", 0.0),
         _lb_note(lb["p"], v.get("autocorr1", 0.0))))
-    a("| ADF（权益序列） | %.2f（5%% 临界 %.2f） | %s |" % (
-        adf["stat"], adf["crit"]["5%"],
-        "拒绝单位根，有均值回归" if adf["reject"] else "不能拒绝单位根，像随机游走"))
+    if adf.get("insufficient"):
+        a("| ADF（权益序列） | 样本不足（< 30 天） | 不检验 |")
+    else:
+        a("| ADF（权益序列） | %.2f（5%% 临界 %.2f） | %s |" % (
+            adf["stat"], adf["crit"]["5%"],
+            "拒绝单位根，有均值回归" if adf["reject"] else "不能拒绝单位根，像随机游走"))
     a("| Hurst（收益 DFA） | %.3f | %s |" % (
         hurst, "趋势持续（动量可能有效）" if hurst > 0.55
         else ("均值回归（反转可能有效）" if hurst < 0.45 else "接近随机游走")))

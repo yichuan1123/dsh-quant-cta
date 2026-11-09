@@ -185,5 +185,20 @@ class TestBootstrap(unittest.TestCase):
         self.assertEqual(a, b)
 
 
+class AdfGuardTests(unittest.TestCase):
+    """短样本：ADF 的增广项会把自由度吃光导致回归矩阵奇异，必须降级而不是崩。"""
+
+    def test_short_series_flagged_not_crashed(self):
+        y = [1.0 + 0.01 * i for i in range(22)]
+        r = T.adf(y, max_lag=5)
+        self.assertTrue(r.get("insufficient"))
+        self.assertFalse(r["reject"])
+
+    def test_flat_then_jump_does_not_crash(self):
+        y = [100.0] * 15 + [100.0 + i for i in range(1, 40)]
+        r = T.adf(y, max_lag=5)
+        self.assertIn("stat", r)
+
+
 if __name__ == "__main__":
     unittest.main()
