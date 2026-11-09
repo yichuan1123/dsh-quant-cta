@@ -602,6 +602,11 @@
     drawCurve(root.curve || []);
 
     renderAttribution(root);
+    if (root.model && (root.model.series || []).length) {
+      var series = root.model.series.slice();
+      series.__skipped = root.model.series_skipped || 0;
+      renderModel(root.model.latest || null, series);
+    }
 
     var tHost = document.getElementById('trades');
     tHost.innerHTML = '';
@@ -1515,6 +1520,144 @@
     zh.textContent = "滚轮缩放 · 拖拽平移 · 双击复位";
     svg.appendChild(zh);
   }
+
+  /**
+   * 权重热力条：横轴=每次重估，纵轴=品种，颜色深浅=权重。
+   * 为什么是热力条而不是折线：28 个品种画 28 条线必然糊成一团，
+   * 而「谁什么时候被加进来/挤出去」这种演化信息，恰恰是密集矩阵最擅长的。
+   */
+  function drawWeightHeat(host, opts) {
+    var series = (opts.series || []).filter(function (s) { return s && s.weights; });
+    if (!series.length) {
+      clearHost(host);
+      host.appendChild(el("div", "empty", opts.empty || "没有权重历史。"));
+      return;
+    }
+    var z = zoomState(host, series.length);
+    paintHeat(host, opts, z);
+  }
+
+  function paintHeat(host, opts, z) {
+    var series = (opts.series || []).filter(function (s) { return s && s.weights; });
+    var rowCap = opts.rowCap || 14;
+    // 行：按「最新权重」排序，太长的尾巴合并成「其他」
+    var last = series[series.length - 1].weights || {};
+    var allCodes = Object.keys(last).sort(function (a, b) { return (last[b] || 0) - (last[a] || 0); });
+    var rows = allCodes.slice(0, rowCap);
+    var rest = allCodes.slice(rowCap);
+
+    var W = hostWidth(host, 660);
+    var pad = { l: 46, r: 14, t: 16, b: 24 };
+    var rowH = 14;
+    var rowCount = rows.length + (rest.length ? 1 : 0);
+    var H = opts.height || (pad.t + pad.b + rowCount * rowH + 6);
+    var svg = makeSvg(host, W, H, "权重热力条");
+
+    var pos = windowPositions(z || zoomState(host, series.length), series.length);
+    var iw = W - pad.l - pad.r, ih = rowCount * rowH;
+    var cellW = iw / Math.max(1, pos.length);
+
+    // 归一化用 p95 而不是最大值：单品种上限只有 15%，权重都挤在 1-6% 时
+    // 拿最大值归一会让整张图糊成一片中等蓝，看不出结构
+    var allW = [];
+    series.forEach(function (s) {
+      Object.keys(s.weights).forEach(function (c) { allW.push(s.weights[c]); });
+    });
+    allW.sort(function (a, b) { return a - b; });
+    var p95 = allW.length ? allW[Math.min(allW.length - 1, Math.floor(allW.length * 0.95))] : 0;
+    var maxW = Math.max(p95, 0.02);
+    if (opts.cap && opts.cap > maxW) maxW = Math.min(opts.cap, Math.max(maxW, p95));
+
+    function rowValue(code, s) {
+      if (code === "__rest__") {
+        var acc = 0;
+        rest.forEach(function (c) { acc += (s.weights[c] || 0); });
+        return acc;
+      }
+      return s.weights[code] || 0;
+    }
+
+    // 单元格
+    var labelCodes = rows.concat(rest.length ? ["__rest__"] : []);
+    for (var r = 0; r < labelCodes.length; r++) {
+      var code = labelCodes[r];
+      for (var c = 0; c < pos.length; c++) {
+        var w = rowValue(code, series[pos[c]]);
+        var k = Math.max(0, Math.min(1, w / maxW));
+        var cell = svgEl("rect", {
+          x: (pad.l + c * cellW).toFixed(2), y: (pad.t + r * rowH).toFixed(2),
+          width: Math.max(1, cellW - 0.6).toFixed(2), height: (rowH - 1.5).toFixed(2),
+          fill: w > 0 ? "hsl(214, 88%, " + (16 + 68 * Math.pow(k, 0.75)).toFixed(1) + "%)"
+                      : "rgba(255,255,255,.03)",
+          rx: "1.5",
+        });
+        cell.setAttribute("data-code", code);
+        cell.setAttribute("data-idx", String(c));
+        svg.appendChild(cell);
+      }
+      var lab = svgEl("text", { x: pad.l - 6, y: pad.t + r * rowH + rowH / 2 + 3.5, "text-anchor": "end" });
+      lab.setAttribute("class", "axis");
+      lab.textContent = code === "__rest__" ? ("其他 " + rest.length) : code;
+      svg.appendChild(lab);
+    }
+
+    // 顶格线：权重触及上限的品种标一条虚线提示「被约束卡住」
+    if (opts.cap) {
+      var capLab = svgEl("text", { x: pad.l, y: pad.t - 5, "text-anchor": "start", fill: "#f0b429", "font-size": "9.5" });
+      capLab.textContent = "单品种上限 " + (opts.cap * 100).toFixed(0) + "%（颜色按最大值归一）";
+      svg.appendChild(capLab);
+    }
+
+    // X 轴：重估日期
+    var ticksX = timeTicks(pos.map(function (i, k2) { return { x: series[i].asof, i: k2 }; }), 6);
+    for (var t = 0; t < ticksX.length; t++) {
+      var tx = svgEl("text", { x: (pad.l + (ticksX[t].i + 0.5) * cellW).toFixed(2), y: H - 6, "text-anchor": "middle" });
+      tx.setAttribute("class", "axis");
+      tx.textContent = ticksX[t].label;
+      svg.appendChild(tx);
+    }
+
+    // 悬停：读单元格，同时给出该品种在最近一次重估里的风险贡献
+    var cross = svgEl("line", { x1: 0, x2: 0, y1: pad.t, y2: pad.t + ih, stroke: "#5b8cff",
+                                "stroke-width": "1", "stroke-dasharray": "3 3", opacity: "0" });
+    svg.appendChild(cross);
+    var hit = svgEl("rect", { x: pad.l, y: pad.t, width: iw, height: ih, fill: "transparent" });
+    if (hit.style) hit.style.cursor = "crosshair";
+    svg.appendChild(hit);
+    if (hit.addEventListener) {
+      hit.addEventListener("mousemove", function (ev) {
+        var box = svg.getBoundingClientRect ? svg.getBoundingClientRect() : { left: 0, top: 0, width: W, height: H };
+        var bw = box.width || W;
+        var scale = W / bw;
+        var xUser = (ev.clientX - box.left) * scale;
+        var yUser = (ev.clientY - box.top) * scale;
+        var col = Math.floor((xUser - pad.l) / cellW);
+        var row = Math.floor((yUser - pad.t) / rowH);
+        if (col < 0 || col >= pos.length || row < 0 || row >= labelCodes.length) return;
+        var s = series[pos[col]];
+        var code = labelCodes[row];
+        var w = rowValue(code, s);
+        cross.setAttribute("x1", pad.l + (col + 0.5) * cellW);
+        cross.setAttribute("x2", pad.l + (col + 0.5) * cellW);
+        cross.setAttribute("opacity", "1");
+        var name = code === "__rest__" ? ("其他 " + rest.length + " 个") : code;
+        var rc = (opts.riskContrib || {})[code];
+        var text = s.asof + "　" + name + " " + (w * 100).toFixed(2) + "%";
+        // 报告里的 risk_contributions 已经是百分数（合计 100），直接显示，别再乘 100
+        if (rc !== undefined && code !== "__rest__") text += "　风险贡献 " + rc.toFixed(1) + "%";
+        var cssX = Math.max(70, Math.min(bw - 70, (pad.l + (col + 0.5) * cellW) / scale));
+        tip(host, text, cssX, 14);
+      });
+      hit.addEventListener("mouseleave", function () {
+        cross.setAttribute("opacity", "0");
+        tip(host, null);
+      });
+    }
+    bindZoom(svg, hit, host, series.length, function () { paintHeat(host, opts, z); });
+    var zh = svgEl("text", { x: pad.l + iw, y: pad.t - 5, "text-anchor": "end", fill: "#6f7683", "font-size": "9.5" });
+    zh.textContent = "滚轮缩放 · 双击复位";
+    svg.appendChild(zh);
+  }
   /** 环形饼图：权重分布 + 上限标记。 */
   function drawDonut(host, opts) {
     var size = 300, cx = size / 2, cy = size / 2 - 8, rOut = 112, rIn = 68;
@@ -1792,7 +1935,13 @@
     return parts.join('　·　');
   }
 
-  function renderModel(m) {
+  /** 报告里可能有不少「预热期没有权重」的快照，被后端跳过了，这里给个数 */
+  function opts_skipped_note(series, n) {
+    var skipped = (typeof series === 'object' && series && series.__skipped) || 0;
+    return skipped ? '，另有 ' + skipped + ' 次数据不足未参与' : '';
+  }
+
+  function renderModel(m, modelSeries) {
     var host = document.getElementById('model');
     clearHost(host);
     var cons = document.getElementById('constraints');
@@ -1852,6 +2001,24 @@
     grid.appendChild(card('观测天数', d.observations === undefined ? '—' : String(d.observations)));
     host.appendChild(grid);
 
+    // 多个重估版本 → 画权重演化热力条（表格只能看「此刻」，看不出「怎么变的」）
+    if (modelSeries && modelSeries.length >= 2) {
+      var skipTxt = opts_skipped_note(modelSeries, modelSeries.length);
+      var heatNote = el('div', 'note', '权重演化：横轴=每次重估（共 ' + modelSeries.length +
+        ' 次算出权重' + skipTxt + '），纵轴=品种，颜色越亮权重越大。悬停看某一格的具体数值与风险贡献。');
+      host.appendChild(heatNote);
+      var heatHost = el('div');
+      host.appendChild(heatHost);
+      drawWeightHeat(heatHost, {
+        series: modelSeries,
+        cap: cap,
+        riskContrib: d.risk_contributions || {},
+        rowCap: 14,
+      });
+      return;
+    }
+
+    // 只有一份快照（模拟盘的 state/model.json）→ 给权重 + 风险贡献的明细表
     var rows = codes.map(function (c) {
       return { code: c, w: weights[c], rc: (d.risk_contributions || {})[c],
                capped: cap ? weights[c] >= cap - 1e-9 : false };
@@ -1947,7 +2114,7 @@
     renderExpectation(LAST_RUN);
     if (LAST_RUN) {
       renderAttribution(LAST_RUN);
-      if (LAST_RUN.model && LAST_RUN.model.latest) renderModel(LAST_RUN.model);
+      if (LAST_RUN.model && LAST_RUN.model.latest) renderModel(LAST_RUN.model.latest, LAST_RUN.model.series || []);
     }
     if (LAST_CURVE && LAST_CURVE.length) renderIntraday();
   }
@@ -2017,7 +2184,7 @@
   // 供自动化测试 / 浏览器调试用：不参与渲染逻辑，只是把纯函数拿出来
   window.__dshQuantCtaCharts = {
     drawLine: drawLine, drawDonut: drawDonut, drawBars: drawBars, drawSectorBars: drawSectorBars,
-    drawMultiLine: drawMultiLine, cumSeries: cumSeries,
+    drawMultiLine: drawMultiLine, cumSeries: cumSeries, drawWeightHeat: drawWeightHeat,
     zoomState: zoomState, windowPositions: windowPositions,
     niceTicks: niceTicks, colorMap: colorMap, sectorColor: sectorColor, constraintsText: constraintsText,
     fmtAxis: fmtAxis, lttb: lttb, timeTicks: timeTicks, rollingVol: rollingVol, hostWidth: hostWidth,

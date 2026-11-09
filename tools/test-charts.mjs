@@ -292,7 +292,33 @@ C.drawMultiLine(emptyHost, { series: [] })
 const emptySvg = emptyHost.children.filter((c) => c.tagName === 'svg')[0]
 assert(emptySvg !== undefined && all(emptySvg, 'text').length >= 1, '空序列给出「没有数据」而不是崩溃')
 
-for (const chart of [host1, host2, host3, host4, host5, host6, hostScale, multiHost, emptyHost]) {
+
+/* ── 权重热力条 ── */
+const heatHost = node('div')
+const heatSeries = []
+for (let k = 0; k < 6; k++) {
+  const w = {}
+  ;['rb', 'cu', 'i', 'm'].forEach((c, i2) => { w[c] = Number((0.02 + ((i2 + k) % 4) * 0.02).toFixed(3)) })
+  heatSeries.push({ version: k, asof: '2024-0' + (k + 1) + '-01', weights: w })
+}
+C.drawWeightHeat(heatHost, { series: heatSeries, cap: 0.15, rowCap: 4 })
+const heatSvg = heatHost.children.filter((c) => c.tagName === 'svg')[0]
+assert(heatSvg !== undefined, '热力条生成了 SVG')
+const heatCells = all(heatSvg, 'rect').filter((r) => r.attrs['data-code'] !== undefined)
+assert(heatCells.length === 4 * 6, '格子数 = 品种数 × 重估次数（实际 ' + heatCells.length + '）')
+const heatFills = new Set(heatCells.map((c) => String(c.attrs.fill)))
+assert(heatFills.size > 3, '颜色随权重变化（不同色阶 ' + heatFills.size + ' 种）')
+assert(heatCells.every((c) => /hsl\(214/.test(String(c.attrs.fill)) || /rgba/.test(String(c.attrs.fill))),
+  '格子用 hsl 渐变或空值灰底')
+assert(all(heatSvg, 'text').some((t) => String(t.textContent) === 'rb'), '纵轴标出品种名')
+assert(all(heatSvg, 'text').some((t) => String(t.textContent).indexOf('滚轮缩放') >= 0), '提示了缩放操作')
+
+const heatEmpty = node('div')
+C.drawWeightHeat(heatEmpty, { series: [] })
+assert(heatEmpty.children.length >= 1 && String(heatEmpty.children[0].textContent).indexOf('权重') >= 0,
+  '空序列给出提示而不是空白')
+
+for (const chart of [host1, host2, host3, host4, host5, host6, hostScale, multiHost, emptyHost, heatHost]) {
   for (const svg of chart.children.filter((c) => c.tagName === 'svg')) textHosts.push(svg)
 }
 let textCount = 0

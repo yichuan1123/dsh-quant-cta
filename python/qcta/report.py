@@ -275,10 +275,16 @@ def write_reports(out_dir, result, meta=None, n_trials=1):
             {
                 "rebalances": len(result.model_history),
                 "latest": result.model_history[-1],
+                # 权重演化要画热力条：必须留全部重估记录（原来只留最后 40 次，
+                # 10 年窗口有 300+ 次，一张图里只剩末尾一小截，等于没法看演化）
+                # 只留「算出了权重」的快照：预热期（数据不够 250 根）的空白快照
+                # 在热力条上就是一片黑，除了占地方没有信息量
                 "series": [
-                    {"version": s.get("version"), "asof": s.get("asof"), "weights": s.get("weights", {})}
-                    for s in result.model_history[-40:]
+                    {"version": s.get("version"), "asof": s.get("asof"),
+                     "weights": {k: round(float(v), 4) for k, v in (s.get("weights") or {}).items()}}
+                    for s in result.model_history if s.get("weights")
                 ],
+                "series_skipped": sum(1 for s in result.model_history if not s.get("weights")),
             }
             if getattr(result, "model_history", None) else None
         ),

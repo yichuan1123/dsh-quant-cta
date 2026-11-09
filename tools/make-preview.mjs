@@ -11,6 +11,9 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const html = readFileSync(join(ROOT, 'panel.html'), 'utf8')
+// --report <path>：用真实报告渲染预览页（检查真实数据下的图表外观，而不是假数据）
+const reportArg = process.argv.indexOf('--report')
+const realReport = reportArg > 0 ? JSON.parse(readFileSync(process.argv[reportArg + 1], 'utf8')) : null
 
 /* ── 造一份像样的假数据 ── */
 const codes = ['rb', 'hc', 'cu', 'al', 'zn', 'ni', 'ru', 'au', 'ag', 'i', 'j', 'jm', 'm', 'y',
@@ -50,6 +53,19 @@ for (let i = 0; i < 18; i++) {
     close_date: curve[i * 5 + 4].date, pnl: Number(((rnd() - 0.42) * 9000).toFixed(2)) })
 }
 
+// 权重演化（热力条要的历史）：让部分品种慢慢加进来、部分慢慢退出去
+const modelSeries = []
+for (let k = 0; k < 26; k++) {
+  const w = {}
+  codes.forEach((c, i2) => {
+    const phase = (i2 * 0.37) + k * 0.12
+    const v = 0.55 / codes.length + Math.max(0, Math.sin(phase)) * 1.4 / codes.length
+    if (v > 0.004) w[c] = Number(v.toFixed(4))
+  })
+  const idx = Math.min(curve.length - 1, Math.floor((k + 1) * curve.length / 27))
+  modelSeries.push({ version: 300 + k, asof: curve[idx].date, weights: w })
+}
+
 const model = {
   version: 337, asof: curve[curve.length - 1].date, method: 'risk_parity',
   weights, diagnostics: {
@@ -71,10 +87,22 @@ const overview = {
     symbols: { rb: { pnl: 68497, win_rate_pct: 42, trades: 69 }, cu: { pnl: -9769, win_rate_pct: 25, trades: 4 },
       m: { pnl: 210312, win_rate_pct: 57.9, trades: 76 }, TA: { pnl: 154620, win_rate_pct: 66.7, trades: 129 } },
     curve, trades,
+    model: { rebalances: modelSeries.length, latest: model, series: modelSeries },
   },
   paper: null,
   model,
   sim: { running: false, intervalSec: 300, ticks: 3, last: { at: new Date().toISOString(), last_date: '2026-11-09' }, lastError: '' },
+}
+
+// 真实报告模式：把 overview.latest 换成真实报告（必须在 stub 序列化之前）
+if (realReport) {
+  overview.latest = realReport
+  overview.runs = [{ run_id: (realReport.meta || {}).run_id || 'real',
+    data_source: (realReport.meta || {}).data_source,
+    cagr_pct: (realReport.metrics || {}).cagr_pct,
+    sharpe: (realReport.metrics || {}).sharpe,
+    max_drawdown_pct: (realReport.metrics || {}).max_drawdown_pct,
+    trades: (realReport.metrics || {}).trades }]
 }
 
 const stub = [
@@ -119,4 +147,4 @@ const stub = [
 const out = html.replace(/<script>/, stub + '\n<script>')
 mkdirSync(join(ROOT, '.preview'), { recursive: true })
 writeFileSync(join(ROOT, '.preview', 'chart-preview.html'), out, 'utf8')
-console.log('已生成 .preview/chart-preview.html（假数据：' + curve.length + ' 个交易日 / ' + codes.length + ' 个品种）')
+console.log('已生成 .preview/chart-preview.html（' + (realReport ? '真实报告 ' + ((realReport.meta || {}).run_id || '') : '假数据') + '）')
