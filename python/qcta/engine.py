@@ -278,13 +278,54 @@ class Backtester:
             raw = [float(override.get(t.symbol, 0.0)) if override is not None else float(t.weight) for t in targets]
         weights = normalize_weights(raw)
         budget_total = daily_risk_budget(equity, self.cfg.target_vol)
-        desired = {}
+        entries = []
         for t, w in zip(targets, weights):
             spec = self.specs.get(t.symbol)
             if spec is None or t.direction == 0 or w <= 0:
                 continue
-            a = atr_map.get(t.symbol) or 0.0
-            lots = lots_for_risk(spec, equity, a, budget_total * w, self.cfg.max_symbol_risk)
+            entries.append((t, spec, w))
+        if not entries:
+            return {}
+
+        budgets = {t.symbol: budget_total * w for t, _spec, w in entries}
+        lots_map = {}
+
+        # ── 预算回收（lots-aware redistribution）──
+        # 只按权重分预算时，单手风险超过预算的品种会算出 0 手：
+        # 它的预算既没变成持仓，也没给别人，等价于「资金凭空蒸发」。
+        # 实测 100 万 / 目标 10% 时 28 个品种只有 6 个真正建过仓，
+        # 波动利用率只有 23% —— 根因就在这里。
+        # 这里把 0 手品种的预算按比例回填给能下单的品种，最多迭代 3 轮。
+        if not getattr(self.cfg, "recycle_budget", False):
+            for t, spec, _w in entries:
+                a = atr_map.get(t.symbol) or 0.0
+                lots_map[t.symbol] = lots_for_risk(
+                    spec, equity, a, budgets.get(t.symbol, 0.0), self.cfg.max_symbol_risk)
+        for _ in range(3 if getattr(self.cfg, "recycle_budget", False) else 0):
+            lots_map = {}
+            for t, spec, _w in entries:
+                a = atr_map.get(t.symbol) or 0.0
+                lots_map[t.symbol] = lots_for_risk(
+                    spec, equity, a, budgets.get(t.symbol, 0.0), self.cfg.max_symbol_risk)
+            zero = [s for s, l in lots_map.items() if l <= 0]
+            if not zero:
+                break
+            keep = [s for s, l in lots_map.items() if l > 0]
+            if not keep:
+                break
+            reclaim = sum(budgets.get(s, 0.0) for s in zero)
+            base = sum(budgets.get(s, 0.0) for s in keep)
+            for s in zero:
+                budgets[s] = 0.0
+            if base > 0:
+                for s in keep:
+                    budgets[s] = budgets.get(s, 0.0) + reclaim * budgets[s] / base
+            else:
+                break
+
+        desired = {}
+        for t, spec, _w in entries:
+            lots = lots_map.get(t.symbol, 0)
             if lots > 0:
                 desired[t.symbol] = [int(t.direction), lots]
         prices = {c: (self.index.get(c, {}).get(spec_snapshot["from"]).close if self.index.get(c, {}).get(spec_snapshot["from"]) else 0.0)

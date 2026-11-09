@@ -160,6 +160,18 @@ python -m qcta paper step --live
 
 细节见 [docs/DESIGN.md](docs/DESIGN.md)。
 
+## 真实数据上的结论（2021–2026，28 个品种）
+
+| | 数据来源 | 年化 | 波动 | 夏普 | 最大回撤 |
+|---|---|---|---|---|---|
+| 合成数据 | synthetic | +9.46% | 2.50% | 3.64 | 3.27% |
+| 真实行情（20/10） | tqsdk | −0.21% | 1.69% | −0.12 | 3.97% |
+| 真实行情（40/20，新默认） | tqsdk | +0.06% | 1.75% | 0.04 | 4.27% |
+
+**合成数据把年化高估了约 9.7 个百分点** —— 详见 [docs/SWEEP.md](docs/SWEEP.md)：
+其中记录了通道参数、资金规模、目标波动的完整扫描，以及「仓位为什么吃不满」的排查
+（100 万/10% 时 28 个品种只有 6 个真正建过仓，单手风险粒度把预算吃掉了）。
+
 ## 它做不到什么
 
 - **没有实盘下单**。要接 CTP 得自己写，且先想清楚风控。
@@ -173,7 +185,7 @@ python -m qcta paper step --live
 ## 开发
 
 ```bash
-python -m unittest discover -s python/tests -t python   # 88 个单测
+python -m unittest discover -s python/tests -t python   # 92 个单测
 node --check lib/index.js                              # 插件语法
 node tools/smoke.mjs                                   # 插件冒烟（假 ctx + 真引擎）
 cd python && python -m qcta backtest --pool starter --start 2021-01-01 --name ci_run

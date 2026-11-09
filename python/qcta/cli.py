@@ -344,6 +344,7 @@ def _config_from_args(args):
         model_sector_cap=getattr(args, "sector_cap", 0.35),
         model_min_bars=getattr(args, "model_min_bars", 250),
         model_exclude_sectors=tuple(x for x in (getattr(args, "exclude_sectors", "") or "").split(",") if x),
+        recycle_budget=bool(getattr(args, "recycle_budget", False)),
     )
 
 
@@ -524,6 +525,8 @@ def build_parser():
     b.add_argument("--sector-cap", dest="sector_cap", type=float, default=0.35)
     b.add_argument("--model-min-bars", dest="model_min_bars", type=int, default=250)
     b.add_argument("--exclude-sectors", dest="exclude_sectors", default="")
+    b.add_argument("--recycle-budget", dest="recycle_budget", action="store_true",
+                   help="把算出 0 手的品种预算回填给能下单的品种（会显著放大实际波动，慎用）")
     b.add_argument("--name", default="")
     b.add_argument("--json", action="store_true")
     b.set_defaults(func=cmd_backtest)

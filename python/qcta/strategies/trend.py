@@ -14,7 +14,9 @@ from .base import Strategy
 class DonchianTrend(Strategy):
     name = "trend"
 
-    def __init__(self, entry: int = 20, exit: int = 10, enabled: bool = True):
+    # 默认 40/20：真实数据扫描里 IS(2021-2024) 与 OOS(2024-今) 都优于 20/10，
+    # 且成本低三分之一（见 docs/SWEEP.md）。20/10 在两段上都是负的。
+    def __init__(self, entry: int = 40, exit: int = 20, enabled: bool = True):
         self.entry = int(entry)
         self.exit = int(exit)
         self.enabled = enabled

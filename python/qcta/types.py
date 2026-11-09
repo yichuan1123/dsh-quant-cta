@@ -133,4 +133,8 @@ class EngineConfig:
     model_min_bars: int = 250               # 进入品种池所需的最少历史
     model_exclude_sectors: tuple = ()       # 例如 ("金融",)
     risk_weights: dict = None               # 显式指定权重（优先级最高，paper/外部传入用）
+    # 预算回收：把「单手风险超过预算、算出 0 手」的品种预算，回填给能下单的品种。
+    # 默认关闭——它会把实际波动从约 1/4 目标放大到接近目标（约 4 倍风险），
+    # 静默开启等于偷偷改风险预算。要开启请同时下调 target_vol。
+    recycle_budget: bool = False
     sleeves: tuple = ()
