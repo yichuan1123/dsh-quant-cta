@@ -538,7 +538,9 @@
     drawMultiLine(sHost, {
       series: sleeveSeries, height: 220, label: '策略腿累计净盈亏',
       tipFormat: function (v) { return money(v); },
-      empty: '还没有成交：跑一次回测后这里会显示每条腿的累计净盈亏。',
+      empty: (root.trades && root.trades.length)
+        ? '这批成交记录里没有策略腿字段（旧版报告），无法按腿拆分。重跑一次回测即可。'
+        : '还没有成交：跑一次回测后这里会显示每条腿的累计净盈亏。',
     });
 
     // 品种归因：28 个品种全画会糊成一片，取 |净盈亏| 前 8 名 + 其余合并成一条
@@ -562,7 +564,9 @@
     drawMultiLine(yHost, {
       series: symSeries, height: 260, label: '品种累计净盈亏',
       tipFormat: function (v) { return money(v); },
-      empty: '还没有成交。',
+      empty: (root.trades && root.trades.length)
+        ? '这批成交记录里没有品种字段（旧版报告），无法按品种拆分。'
+        : '还没有成交。',
     });
   }
 
